@@ -53,7 +53,7 @@ spec:
               cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
               cd /nvme/code/imagenet
               pip install --no-cache-dir huggingface_hub 2>&1 | tail -1
-              python -c "import torch, torchvision, diffusers, timm; print(torch.__version__, torchvision.__version__, diffusers.__version__, timm.__version__)" | tee "$RUN/versions.txt"
+              python3 -c "import torch, torchvision, diffusers, timm; print(torch.__version__, torchvision.__version__, diffusers.__version__, timm.__version__)" | tee "$RUN/versions.txt"
               mkdir -p /nvme/tmp
               torchrun --nnodes=1 --nproc_per_node=1 sample.py \
                 --model DM-B/2 --sampler st --stepsize 0.022 --cfg-scale 2.0 \

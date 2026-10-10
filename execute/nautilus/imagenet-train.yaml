@@ -55,10 +55,10 @@ spec:
               cp -r /pv/distance-marching /nvme/code
               cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
               cd /nvme/code/imagenet
-              python -c "import torch, torchvision, diffusers, timm; print(torch.__version__, torchvision.__version__, diffusers.__version__, timm.__version__)" | tee "$RUN/versions.txt"
+              python3 -c "import torch, torchvision, diffusers, timm; print(torch.__version__, torchvision.__version__, diffusers.__version__, timm.__version__)" | tee "$RUN/versions.txt"
               echo "=== stage 1: unpack ImageNet train to /nvme/imagenet ==="
               mkdir -p /nvme/imagenet
-              python prepare_imagenet.py --train-tar /pv/EqM/ILSVRC2012_img_train.tar --output-dir /nvme/imagenet 2>&1 | tail -3
+              python3 prepare_imagenet.py --train-tar /pv/EqM/ILSVRC2012_img_train.tar --output-dir /nvme/imagenet 2>&1 | tail -3
               ls /nvme/imagenet/train | wc -l | tee "$RUN/num_classes.txt"
               df -h /nvme | tail -1
               echo "=== stage 2: train ==="

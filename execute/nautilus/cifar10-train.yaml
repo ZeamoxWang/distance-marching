@@ -55,7 +55,7 @@ spec:
               cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
               cd /nvme/code/cifar10
               pip install --no-cache-dir -r requirements.txt 2>&1 | tail -3
-              python -c "import torch, torchmetrics, torchvision; print(torch.__version__, torchvision.__version__, torchmetrics.__version__)" | tee "$RUN/versions.txt"
+              python3 -c "import torch, torchmetrics, torchvision; print(torch.__version__, torchvision.__version__, torchmetrics.__version__)" | tee "$RUN/versions.txt"
               mkdir -p /nvme/data && cp /pv/flow_matching/data/cifar-10-python.tar.gz /nvme/data/
               torchrun --nproc_per_node=4 train.py --data_path /nvme/data \
                 --batch_size 128 --accum_iter 1 --epochs "$EPOCHS" --num_workers 10 \
