@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.DS_Store
+
+# data, outputs, checkpoints
+data/
+*/data/
+output_dir/
+output_*/
+samples_*/
+outputs/
+results/
+*.pth
+*.pt
+*.npy
+*.npz
+wandb/
+*.log
