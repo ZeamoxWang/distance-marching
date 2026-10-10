@@ -12,7 +12,7 @@ metadata:
     run-id: zimo-dm-cifar10-st-1
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 50400
+  activeDeadlineSeconds: 86400
   ttlSecondsAfterFinished: 172800
   template:
     metadata:

@@ -1,0 +1,99 @@
+# CIFAR-10 smoke test (non-A100 GPU variant, used when all A100s are busy): one training batch + one eval batch, then a 256-sample
+# FID run from the Hugging Face checkpoint (checks the code path, the
+# checkpoint compatibility and the HF download). 1 x A100.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-cifar10-smoke-5-anygpu
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-cifar10-smoke-5-anygpu
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 5400
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-cifar10-smoke-5-anygpu
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A40
+                      - NVIDIA-RTX-A6000
+                      - NVIDIA-A10
+                      - NVIDIA-L40
+                      - NVIDIA-GeForce-RTX-3090
+                      - NVIDIA-GeForce-RTX-4090
+      containers:
+        - name: compute
+          image: zeamoxwang/flow_matching@sha256:641b50a68367997b27435125300f0934992c29564962f148b6e12f870a0c53c8  # :latest amd64 2025-11-11
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-cifar10-smoke-5-anygpu
+            - name: HF_HOME
+              value: /nvme/hf
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              nvidia-smi
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              mkdir -p "$RUN"
+              cp -r /pv/distance-marching /nvme/code
+              cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
+              cd /nvme/code/cifar10
+              pip install --no-cache-dir -r requirements.txt 2>&1 | tail -3
+              python3 -c "import torch, torchmetrics, torchvision; print(torch.__version__, torchvision.__version__, torchmetrics.__version__)" | tee "$RUN/versions.txt"
+              mkdir -p /nvme/data && cp /pv/flow_matching/data/cifar-10-python.tar.gz /nvme/data/
+              python3 train.py --test_run --data_path /nvme/data --batch_size 128 --num_workers 8 \
+                --use_ema --ema_decay 0.999 --separate_t --max_period 1000000 --unified_scale 120.0 \
+                --c 4.0 --w_os 0.1 --w_de 1.0 --skewed_timesteps --class_drop_prob 1.0 --cfg_scale 0.0 \
+                --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+                --compute_fid --fid_samples 128 --seed 0 --output_dir "$RUN/train_smoke" 2>&1 | tee "$RUN/train_smoke.log"
+              python3 sample.py --data_path /nvme/data --batch_size 128 --num_workers 8 \
+                --use_ema --separate_t --max_period 1000000 --unified_scale 120.0 \
+                --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+                --compute_fid --fid_samples 256 --save_fid_samples --seed 0 --test_run \
+                --output_dir "$RUN/sample_smoke" 2>&1 | tee "$RUN/sample_smoke.log"
+              echo "SMOKE DONE"
+          resources:
+            requests:
+              cpu: "8"
+              memory: 32Gi
+              ephemeral-storage: 60Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "8"
+              memory: 32Gi
+              ephemeral-storage: 60Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+            - name: nvme
+              mountPath: /nvme
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
+        - name: nvme
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
