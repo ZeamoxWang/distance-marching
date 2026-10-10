@@ -12,7 +12,7 @@ metadata:
     run-id: zimo-dm-cifar10-smoke-5-anygpu
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 5400
+  activeDeadlineSeconds: 86400  # counts queue time too; A100s are often all busy
   ttlSecondsAfterFinished: 172800
   template:
     metadata:

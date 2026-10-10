@@ -14,7 +14,7 @@ metadata:
     run-id: zimo-dm-imagenet-gd-1
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 64800
+  activeDeadlineSeconds: 172800  # counts queue time too; A100 80GB nodes are often all busy
   ttlSecondsAfterFinished: 172800
   template:
     metadata:

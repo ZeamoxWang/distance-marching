@@ -13,7 +13,7 @@ metadata:
     run-id: zimo-dm-imagenet-smoke-1
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 7200
+  activeDeadlineSeconds: 86400  # counts queue time too; A100s are often all busy
   ttlSecondsAfterFinished: 172800
   template:
     metadata:
