@@ -33,7 +33,7 @@ spec:
                       - NVIDIA-A100-SXM4-80GB
       containers:
         - name: compute
-          image: zeamoxwang/flow_matching:latest
+          image: zeamoxwang/flow_matching@sha256:641b50a68367997b27435125300f0934992c29564962f148b6e12f870a0c53c8  # :latest amd64 2025-11-11
           imagePullPolicy: IfNotPresent
           env:
             - name: RUN_ID
