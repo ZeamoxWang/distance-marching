@@ -1,0 +1,97 @@
+# CIFAR-10 training with the paper configuration on 4 x A100 (batch 128 per
+# GPU, lr 1e-4, lambda_OS 0.1, lambda_DE 1.0, c 4.0, EMA 0.999). EPOCHS limits
+# the run so the losses / 1024-sample FID at epochs 9, 19, 29 can be compared
+# with the reference log (/pv/flow_matching/output_dir/no_ot_best/log.txt:
+# FID 349.6 / 113.6 / 71.8). Set EPOCHS=3000 for the full paper run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-cifar10-train-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-cifar10-train-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 28800
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-cifar10-train-1
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-80GB
+      containers:
+        - name: compute
+          image: zeamoxwang/flow_matching:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-cifar10-train-1
+            - name: EPOCHS
+              value: "30"
+            - name: HF_HOME
+              value: /nvme/hf
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              nvidia-smi
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              mkdir -p "$RUN"
+              cp -r /pv/distance-marching /nvme/code
+              cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
+              cd /nvme/code/cifar10
+              pip install --no-cache-dir -r requirements.txt 2>&1 | tail -3
+              python -c "import torch, torchmetrics, torchvision; print(torch.__version__, torchvision.__version__, torchmetrics.__version__)" | tee "$RUN/versions.txt"
+              mkdir -p /nvme/data && cp /pv/flow_matching/data/cifar-10-python.tar.gz /nvme/data/
+              torchrun --nproc_per_node=4 train.py --data_path /nvme/data \
+                --batch_size 128 --accum_iter 1 --epochs "$EPOCHS" --num_workers 10 \
+                --lr 1e-4 --optimizer_betas 0.9 0.95 --class_drop_prob 1.0 --cfg_scale 0.0 \
+                --use_ema --ema_decay 0.999 --skewed_timesteps \
+                --separate_t --max_period 1000000 --unified_scale 120.0 \
+                --c 4.0 --w_os 0.1 --w_de 1.0 \
+                --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.03 --dm_criteria fixed_steps \
+                --compute_fid --fid_samples 1024 --eval_frequency 10 --seed 0 \
+                --output_dir "$RUN/train" 2>&1 | tee "$RUN/train.log"
+              echo "TRAIN DONE"
+          resources:
+            requests:
+              cpu: "32"
+              memory: 96Gi
+              ephemeral-storage: 100Gi
+              nvidia.com/a100: 4
+            limits:
+              cpu: "32"
+              memory: 96Gi
+              ephemeral-storage: 100Gi
+              nvidia.com/a100: 4
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+            - name: nvme
+              mountPath: /nvme
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
+        - name: nvme
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi

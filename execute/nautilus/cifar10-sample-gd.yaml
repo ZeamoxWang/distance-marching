@@ -1,0 +1,89 @@
+# CIFAR-10 full inference: 50k samples with gradient descent (step 0.46, 250
+# steps, seed 0, batch 128, single process) from the Hugging Face checkpoint.
+# Reference: FID 2.545608. 1 x A100, ~8 h.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-cifar10-gd-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-cifar10-gd-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 50400
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-cifar10-gd-1
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-80GB
+      containers:
+        - name: compute
+          image: zeamoxwang/flow_matching:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-cifar10-gd-1
+            - name: HF_HOME
+              value: /nvme/hf
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              nvidia-smi
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              mkdir -p "$RUN"
+              cp -r /pv/distance-marching /nvme/code
+              cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
+              cd /nvme/code/cifar10
+              pip install --no-cache-dir -r requirements.txt 2>&1 | tail -3
+              python -c "import torch, torchmetrics, torchvision; print(torch.__version__, torchvision.__version__, torchmetrics.__version__)" | tee "$RUN/versions.txt"
+              mkdir -p /nvme/data && cp /pv/flow_matching/data/cifar-10-python.tar.gz /nvme/data/
+              python sample.py --data_path /nvme/data --batch_size 128 --num_workers 10 \
+                --use_ema --separate_t --max_period 1000000 --unified_scale 120.0 \
+                --edm_schedule --nfe 250 --dm_method gd --dm_step_size 0.46 --dm_criteria fixed_steps \
+                --compute_fid --fid_samples 50000 --save_fid_samples --seed 0 \
+                --output_dir "$RUN/gd" 2>&1 | tee "$RUN/sample_gd.log"
+              echo "GD DONE"
+          resources:
+            requests:
+              cpu: "12"
+              memory: 48Gi
+              ephemeral-storage: 60Gi
+              nvidia.com/a100: 1
+            limits:
+              cpu: "12"
+              memory: 48Gi
+              ephemeral-storage: 60Gi
+              nvidia.com/a100: 1
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+            - name: nvme
+              mountPath: /nvme
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
+        - name: nvme
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi

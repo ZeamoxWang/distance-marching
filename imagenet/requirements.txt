@@ -1,0 +1,13 @@
+torch>=2.1
+torchvision>=0.16
+timm
+diffusers
+accelerate
+numpy
+pillow
+tqdm
+huggingface_hub
+# FID / IS / sFID / precision / recall with the ADM evaluation suite (evaluator.py)
+tensorflow
+scipy
+requests
