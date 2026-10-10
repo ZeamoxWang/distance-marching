@@ -14,7 +14,7 @@ metadata:
     run-id: zimo-dm-imagenet-st-1
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 172800  # counts queue time too; A100 80GB nodes are often all busy
+  activeDeadlineSeconds: 172800  # counts queue time too; A100 nodes are often all busy
   ttlSecondsAfterFinished: 172800
   template:
     metadata:
@@ -24,15 +24,6 @@ spec:
         run-id: zimo-dm-imagenet-st-1
     spec:
       restartPolicy: Never
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: nvidia.com/gpu.product
-                    operator: In
-                    values:
-                      - NVIDIA-A100-SXM4-80GB
       containers:
         - name: compute
           image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
