@@ -4,12 +4,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: zimo-dm-cifar10-smoke-1
+  name: zimo-dm-cifar10-smoke-2
   namespace: ucsd-ravigroup
   labels:
     owner: zimo
     project: distance-marching
-    run-id: zimo-dm-cifar10-smoke-1
+    run-id: zimo-dm-cifar10-smoke-2
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: 5400
@@ -19,7 +19,7 @@ spec:
       labels:
         owner: zimo
         project: distance-marching
-        run-id: zimo-dm-cifar10-smoke-1
+        run-id: zimo-dm-cifar10-smoke-2
     spec:
       restartPolicy: Never
       affinity:
@@ -37,7 +37,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: RUN_ID
-              value: zimo-dm-cifar10-smoke-1
+              value: zimo-dm-cifar10-smoke-2
             - name: HF_HOME
               value: /nvme/hf
           command: ["/bin/bash", "-c"]
