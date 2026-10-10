@@ -4,12 +4,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: zimo-dm-cifar10-smoke-3
+  name: zimo-dm-cifar10-smoke-4
   namespace: ucsd-ravigroup
   labels:
     owner: zimo
     project: distance-marching
-    run-id: zimo-dm-cifar10-smoke-3
+    run-id: zimo-dm-cifar10-smoke-4
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: 5400
@@ -19,25 +19,16 @@ spec:
       labels:
         owner: zimo
         project: distance-marching
-        run-id: zimo-dm-cifar10-smoke-3
+        run-id: zimo-dm-cifar10-smoke-4
     spec:
       restartPolicy: Never
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: nvidia.com/gpu.product
-                    operator: In
-                    values:
-                      - NVIDIA-A100-SXM4-80GB
       containers:
         - name: compute
           image: zeamoxwang/flow_matching@sha256:641b50a68367997b27435125300f0934992c29564962f148b6e12f870a0c53c8  # :latest amd64 2025-11-11
           imagePullPolicy: IfNotPresent
           env:
             - name: RUN_ID
-              value: zimo-dm-cifar10-smoke-3
+              value: zimo-dm-cifar10-smoke-4
             - name: HF_HOME
               value: /nvme/hf
           command: ["/bin/bash", "-c"]

@@ -24,13 +24,14 @@ spec:
       restartPolicy: Never
       containers:
         - name: compute
-          image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
+          # The ADM evaluator needs TensorFlow 1.x-compatible APIs; the training image has no TensorFlow.
+          image: tensorflow/tensorflow:2.15.0
           imagePullPolicy: IfNotPresent
           env:
             - name: RUN_ID
               value: zimo-dm-imagenet-eval-st-1
             - name: SAMPLES_NPZ
-              value: /pv/distance-marching-runs/zimo-dm-imagenet-st-1/samples_st/samples.npz
+              value: /pv/distance-marching-runs/zimo-dm-imagenet-st-1/samples_st/*/samples.npz
             - name: CUDA_VISIBLE_DEVICES
               value: ""
             - name: OMP_NUM_THREADS
@@ -43,7 +44,11 @@ spec:
               mkdir -p "$RUN"
               cp -r /pv/distance-marching /tmp/code
               cd /tmp/code/imagenet
-              # resolve a glob in SAMPLES_NPZ (timestamped subfolder)
+              pip install --no-cache-dir scipy requests tqdm 2>&1 | tail -1
+              python3 -c "import tensorflow as tf, scipy; print('tensorflow', tf.__version__, 'scipy', scipy.__version__)" | tee "$RUN/versions.txt"
+              # Inception graph used by the ADM evaluator (avoids the download)
+              cp /pv/EqM/classify_image_graph_def.pb .
+              # resolve the glob in SAMPLES_NPZ (timestamped subfolder)
               NPZ=$(ls -1 $SAMPLES_NPZ | head -1)
               echo "evaluating $NPZ" | tee "$RUN/eval.log"
               python3 evaluator.py /pv/EqM/VIRTUAL_imagenet256_labeled.npz "$NPZ" 2>&1 | tee -a "$RUN/eval.log"
