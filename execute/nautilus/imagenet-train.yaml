@@ -1,0 +1,102 @@
+# ImageNet-256 B/2 training with the paper configuration on 4 x A100 (global
+# batch 256, lr 1e-4, lambda_OS 1.0, lambda_DE 30.0, c 100.0, EMA 0.9999).
+# Stage 1 unpacks ILSVRC2012_img_train.tar from the PV into node-local scratch.
+# MAX_STEPS bounds the run so the logged losses can be compared with the
+# reference log (/pv/EqM/results/001-EqM-B-2-Linear-dist-None/log.txt); unset
+# it (empty) for the full 80-epoch paper run (400k steps).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-imagenet-train-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-imagenet-train-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 43200
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-imagenet-train-1
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-80GB
+      containers:
+        - name: compute
+          image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-imagenet-train-1
+            - name: MAX_STEPS
+              value: "3000"
+            - name: HF_HOME
+              value: /nvme/hf
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              nvidia-smi
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              mkdir -p "$RUN"
+              cp -r /pv/distance-marching /nvme/code
+              cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
+              cd /nvme/code/imagenet
+              python -c "import torch, torchvision, diffusers, timm; print(torch.__version__, torchvision.__version__, diffusers.__version__, timm.__version__)" | tee "$RUN/versions.txt"
+              echo "=== stage 1: unpack ImageNet train to /nvme/imagenet ==="
+              mkdir -p /nvme/imagenet
+              python prepare_imagenet.py --train-tar /pv/EqM/ILSVRC2012_img_train.tar --output-dir /nvme/imagenet 2>&1 | tail -3
+              ls /nvme/imagenet/train | wc -l | tee "$RUN/num_classes.txt"
+              df -h /nvme | tail -1
+              echo "=== stage 2: train ==="
+              EXTRA=""
+              if [ -n "$MAX_STEPS" ]; then EXTRA="--max-steps $MAX_STEPS"; fi
+              torchrun --nnodes=1 --nproc_per_node=4 train.py \
+                --model DM-B/2 --data-path /nvme/imagenet/train \
+                --global-batch-size 256 --epochs 80 --global-seed 0 \
+                --lr 1e-4 --ema-decay 0.9999 --class-dropout-prob 0.1 \
+                --rescale-energy 2.78e-3 --one-step-loss-weight 1.0 --eikonal-loss-weight 30.0 --c 100.0 \
+                --num-workers 8 --log-every 100 --ckpt-every 50000 \
+                --results-dir "$RUN/results" $EXTRA 2>&1 | tee "$RUN/train.log"
+              echo "TRAIN DONE"
+          resources:
+            requests:
+              cpu: "32"
+              memory: 128Gi
+              ephemeral-storage: 400Gi
+              nvidia.com/a100: 4
+            limits:
+              cpu: "32"
+              memory: 128Gi
+              ephemeral-storage: 400Gi
+              nvidia.com/a100: 4
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+            - name: nvme
+              mountPath: /nvme
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
+        - name: nvme
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi

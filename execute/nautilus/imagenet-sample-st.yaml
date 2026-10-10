@@ -1,0 +1,92 @@
+# ImageNet-256 B/2 full inference: 50k samples with sphere tracing (step 0.022,
+# CFG 2.0, 250 steps, seed 0, global batch 256, single process) from the
+# Hugging Face EMA checkpoint. Writes samples.npz; FID is computed by the
+# separate CPU job imagenet-eval-fid.yaml. Reference (seed 0): FID 6.562257.
+# 1 x A100.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-imagenet-st-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-imagenet-st-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 64800
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-imagenet-st-1
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-80GB
+      containers:
+        - name: compute
+          image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-imagenet-st-1
+            - name: HF_HOME
+              value: /nvme/hf
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              nvidia-smi
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              mkdir -p "$RUN"
+              cp -r /pv/distance-marching /nvme/code
+              cd /nvme/code && git rev-parse HEAD | tee "$RUN/commit.txt"
+              cd /nvme/code/imagenet
+              pip install --no-cache-dir huggingface_hub 2>&1 | tail -1
+              python -c "import torch, torchvision, diffusers, timm; print(torch.__version__, torchvision.__version__, diffusers.__version__, timm.__version__)" | tee "$RUN/versions.txt"
+              mkdir -p /nvme/tmp
+              torchrun --nnodes=1 --nproc_per_node=1 sample.py \
+                --model DM-B/2 --sampler st --stepsize 0.022 --cfg-scale 2.0 \
+                --num-sampling-steps 250 --num-fid-samples 50000 \
+                --global-batch-size 256 --global-seed 0 \
+                --folder "$RUN/samples_st" --tmp-dir /nvme/tmp 2>&1 | tee "$RUN/sample_st.log"
+              ls -la "$RUN"/samples_st/*/samples.npz
+              echo "ST DONE"
+          resources:
+            requests:
+              cpu: "8"
+              memory: 48Gi
+              ephemeral-storage: 80Gi
+              nvidia.com/a100: 1
+            limits:
+              cpu: "8"
+              memory: 48Gi
+              ephemeral-storage: 80Gi
+              nvidia.com/a100: 1
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+            - name: nvme
+              mountPath: /nvme
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
+        - name: nvme
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi

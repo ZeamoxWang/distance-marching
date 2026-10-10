@@ -1,0 +1,64 @@
+# CPU-only check of the ImageNet image environment (torch / diffusers / timm /
+# tensorflow versions, import test of the new code). No GPU.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-imagenet-envcheck-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-imagenet-envcheck-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-imagenet-envcheck-1
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: compute
+          image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -uo pipefail
+              RUN=/pv/distance-marching-runs/zimo-dm-imagenet-envcheck-1
+              mkdir -p "$RUN"
+              {
+                python3 --version
+                pip list 2>/dev/null | grep -iE '^(torch|torchvision|diffusers|timm|accelerate|tensorflow|scipy|numpy|huggingface|tqdm|pillow|wandb|torchdiffeq)' || true
+                cp -r /pv/distance-marching /tmp/code
+                cd /tmp/code/imagenet
+                python3 -c "import models, dm_losses; print('import models/dm_losses OK'); print(list(models.DM_models))"
+                python3 -c "import diffusers, timm; print('diffusers', diffusers.__version__, 'timm', timm.__version__)"
+                python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" || echo "NO TENSORFLOW"
+                python3 -c "import huggingface_hub; print('huggingface_hub', huggingface_hub.__version__)" || echo "NO huggingface_hub"
+                ls -la /pv/EqM/VIRTUAL_imagenet256_labeled.npz
+                ls /pv/EqM/results/001-EqM-B-2-Linear-dist-None/
+                head -5 /pv/EqM/results/001-EqM-B-2-Linear-dist-None/log.txt
+                grep -m3 'step=0000100\|step=0000500\|step=0001000' /pv/EqM/results/001-EqM-B-2-Linear-dist-None/log.txt || true
+              } 2>&1 | tee "$RUN/envcheck.log"
+              echo "ENVCHECK DONE"
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              ephemeral-storage: 20Gi
+            limits:
+              cpu: "2"
+              memory: 8Gi
+              ephemeral-storage: 20Gi
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu

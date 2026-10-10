@@ -1,0 +1,66 @@
+# CPU-only ADM evaluation (FID / sFID / IS / precision / recall) of a samples.npz
+# against the ImageNet-256 reference batch. Set SAMPLES_NPZ to the file written by
+# an imagenet-sample-*.yaml job. No GPU.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-imagenet-eval-st-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-imagenet-eval-st-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 28800
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-imagenet-eval-st-1
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: compute
+          image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-imagenet-eval-st-1
+            - name: SAMPLES_NPZ
+              value: /pv/distance-marching-runs/zimo-dm-imagenet-st-1/samples_st/samples.npz
+            - name: CUDA_VISIBLE_DEVICES
+              value: ""
+            - name: OMP_NUM_THREADS
+              value: "16"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              mkdir -p "$RUN"
+              cp -r /pv/distance-marching /tmp/code
+              cd /tmp/code/imagenet
+              # resolve a glob in SAMPLES_NPZ (timestamped subfolder)
+              NPZ=$(ls -1 $SAMPLES_NPZ | head -1)
+              echo "evaluating $NPZ" | tee "$RUN/eval.log"
+              python3 evaluator.py /pv/EqM/VIRTUAL_imagenet256_labeled.npz "$NPZ" 2>&1 | tee -a "$RUN/eval.log"
+              echo "EVAL DONE"
+          resources:
+            requests:
+              cpu: "16"
+              memory: 64Gi
+              ephemeral-storage: 40Gi
+            limits:
+              cpu: "16"
+              memory: 64Gi
+              ephemeral-storage: 40Gi
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
