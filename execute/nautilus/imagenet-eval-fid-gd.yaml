@@ -32,8 +32,6 @@ spec:
               value: zimo-dm-imagenet-eval-gd-1
             - name: SAMPLES_NPZ
               value: /pv/distance-marching-runs/zimo-dm-imagenet-gd-1/samples_gd/*/samples.npz
-            - name: CUDA_VISIBLE_DEVICES
-              value: ""
             - name: OMP_NUM_THREADS
               value: "16"
           command: ["/bin/bash", "-c"]
