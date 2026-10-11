@@ -1,0 +1,71 @@
+# CPU-only ADM evaluation (FID / sFID / IS / precision / recall) of a samples.npz
+# against the ImageNet-256 reference batch. Set SAMPLES_NPZ to the file written by
+# an imagenet-sample-*.yaml job. No GPU.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-imagenet-eval-gd-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-imagenet-eval-gd-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 28800
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-imagenet-eval-gd-1
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: compute
+          # The ADM evaluator needs TensorFlow 1.x-compatible APIs; the training image has no TensorFlow.
+          image: tensorflow/tensorflow:2.15.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-imagenet-eval-gd-1
+            - name: SAMPLES_NPZ
+              value: /pv/distance-marching-runs/zimo-dm-imagenet-gd-1/samples_gd/*/samples.npz
+            - name: CUDA_VISIBLE_DEVICES
+              value: ""
+            - name: OMP_NUM_THREADS
+              value: "16"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              mkdir -p "$RUN"
+              cp -r /pv/distance-marching /tmp/code
+              cd /tmp/code/imagenet
+              pip install --no-cache-dir scipy requests tqdm 2>&1 | tail -1
+              python3 -c "import tensorflow as tf, scipy; print('tensorflow', tf.__version__, 'scipy', scipy.__version__)" | tee "$RUN/versions.txt"
+              # Inception graph used by the ADM evaluator (avoids the download)
+              cp /pv/EqM/classify_image_graph_def.pb .
+              # resolve the glob in SAMPLES_NPZ (timestamped subfolder)
+              NPZ=$(ls -1 $SAMPLES_NPZ | head -1)
+              echo "evaluating $NPZ" | tee "$RUN/eval.log"
+              python3 evaluator.py /pv/EqM/VIRTUAL_imagenet256_labeled.npz "$NPZ" 2>&1 | tee -a "$RUN/eval.log"
+              echo "EVAL DONE"
+          resources:
+            requests:
+              cpu: "16"
+              memory: 64Gi
+              ephemeral-storage: 40Gi
+            limits:
+              cpu: "16"
+              memory: 64Gi
+              ephemeral-storage: 40Gi
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
