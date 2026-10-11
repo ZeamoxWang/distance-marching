@@ -42,7 +42,7 @@ spec:
               mkdir -p "$RUN"
               cp -r /pv/distance-marching /tmp/code
               cd /tmp/code/imagenet
-              pip install --no-cache-dir scipy requests tqdm 2>&1 | tail -1
+              pip install --no-cache-dir "numpy<2" "scipy<1.14" requests tqdm 2>&1 | tail -1  # keep the numpy 1.x that TensorFlow 2.15 was built against
               python3 -c "import tensorflow as tf, scipy; print('tensorflow', tf.__version__, 'scipy', scipy.__version__)" | tee "$RUN/versions.txt"
               # Inception graph used by the ADM evaluator (avoids the download)
               cp /pv/EqM/classify_image_graph_def.pb .
