@@ -33,6 +33,11 @@ spec:
                     operator: In
                     values:
                       - NVIDIA-A100-SXM4-80GB
+                  # node whose CephFS CSI driver broke mid-run on 2026-10-10 (killed imagenet-st-1)
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - gp-engine.usd.edu
       containers:
         - name: compute
           image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
