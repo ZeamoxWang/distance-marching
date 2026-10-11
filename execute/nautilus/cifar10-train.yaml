@@ -14,7 +14,7 @@ metadata:
     run-id: zimo-dm-cifar10-train-1
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 86400  # counts queue time too; A100s are often all busy
+  activeDeadlineSeconds: 172800  # counts queue time too; 4 x A100 80GB can wait > 1 day
   ttlSecondsAfterFinished: 172800
   template:
     metadata:
