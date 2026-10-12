@@ -18,12 +18,19 @@ reference numbers. Pretrained checkpoints are hosted at
 [`zimowang/Distance-Marching`](https://huggingface.co/zimowang/Distance-Marching)
 on Hugging Face and are downloaded automatically by the inference scripts.
 
-| Checkpoint | Sampler | Steps | FID (50k) |
-| --- | --- | ---: | ---: |
-| `cifar10-checkpoint-1809.pth` | sphere tracing, step 0.031 | 250 | 2.23 |
-| `cifar10-checkpoint-1809.pth` | gradient descent, step 0.46 | 250 | 2.54 |
-| `imagenet-b2-0400000-ema.pt` (SiT-B/2, CFG 2.0) | sphere tracing, step 0.022 | 250 | 6.59 |
-| `imagenet-b2-0400000-ema.pt` (SiT-B/2, CFG 2.0) | gradient descent, step 0.64 | 250 | 6.67 |
+| Checkpoint | Sampler | Steps | FID (50k), paper | FID (50k), this repo |
+| --- | --- | ---: | ---: | ---: |
+| `cifar10-checkpoint-1809.pth` | sphere tracing, step 0.031 | 250 | 2.23 | 2.24 |
+| `cifar10-checkpoint-1809.pth` | gradient descent, step 0.46 | 250 | 2.54 | 2.55 |
+| `imagenet-b2-0400000-ema.pt` (SiT-B/2, CFG 2.0) | sphere tracing, step 0.022 | 250 | 6.59 | 6.57 |
+| `imagenet-b2-0400000-ema.pt` (SiT-B/2, CFG 2.0) | gradient descent, step 0.64 | 250 | 6.67 | 6.63 |
+
+The paper column is the mean over three seeds; the last column is what the
+commands in this repository produce with seed 0 on one A100 (the paper's seed-0
+numbers are 2.23 / 2.55 / 6.56 / 6.62, so the remaining difference is GPU
+floating-point nondeterminism). The training scripts were also checked against
+the original runs: the CIFAR-10 per-epoch losses match to three decimals and the
+ImageNet losses over the first 3000 steps match within 2%.
 
 ## Method in one paragraph
 

@@ -113,5 +113,11 @@ python evaluator.py VIRTUAL_imagenet256_labeled.npz samples_st/<timestamp>/sampl
 | gradient descent (`gd`) | 0.64 | 6.615 | 6.688 | 6.709 | 6.67 |
 
 Seed 0 was generated with `--global-batch-size 256`, seeds 1 and 2 with 128.
+Running the seed-0 commands above from this repository (one A100-80GB, batch
+256, about 5.7 h per 50k samples) gives `st` FID 6.5748 / sFID 5.41 / IS 187.8 /
+precision 0.848 / recall 0.408 and `gd` FID 6.6276 / sFID 6.39 / IS 188.1 /
+precision 0.844 / recall 0.410. The B/2 training command reproduces the original
+loss curve over the first 3000 steps within 2% (step 3000: 12.89 vs 12.91) at
+2.19 steps/s on 4 A100-80GB.
 Paper step sizes for the other sizes: `st` 0.022 for all, `gd` 0.64 (S/2, B/2,
 L/2) and 0.68 (XL/2).

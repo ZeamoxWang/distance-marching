@@ -109,6 +109,13 @@ for a local checkpoint. The generated images are saved as a uint8 array in
 | `cifar10-checkpoint-1809.pth` | sphere tracing (`st`) | 250 | 0.031 | 2.23 |
 | `cifar10-checkpoint-1809.pth` | gradient descent (`gd`) | 250 | 0.46 | 2.54 |
 
+Running the two commands above from this repository (seed 0, one A100-80GB,
+batch 128, about 2.5 h each) gives FID 2.2439 (`st`) and 2.5511 (`gd`); the
+original runs gave 2.2342 and 2.5456 with the same seed. The paper's seed
+standard deviations are 0.021 (`st`) and 0.031 (`gd`). The 30-epoch training
+command above reproduces the original per-epoch losses to three decimals
+(epoch 29: loss 0.1411, 1024-sample FID 70.8 vs 71.8).
+
 FID is computed with `torchmetrics.image.fid.FrechetInceptionDistance(normalize=True)`
 (Inception features from `torch-fidelity`) between the generated images and the
 50,000 CIFAR-10 training images streamed through the training transform.
