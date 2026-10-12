@@ -123,7 +123,7 @@ def train_one_epoch(
             )
             DE_loss = DE_loss.mean()
 
-            # One-step loss with inverse-squared-distance reweighting
+            # One-step loss with weight 1 / (||x - s||^2 + eps)
             if args.OS_loss_ablation:
                 OS_loss = (
                     ((onestep_target - samples) ** 2)

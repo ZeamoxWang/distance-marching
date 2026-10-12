@@ -190,7 +190,7 @@ def get_train_args_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--OS_loss_ablation",
         action="store_true",
-        help="Ablation: one-step loss without the inverse-squared-distance reweighting.",
+        help="Ablation: one-step loss without the weight 1 / (||x - s||^2 + eps).",
     )
     parser.add_argument(
         "--eval_frequency",

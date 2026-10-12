@@ -3,7 +3,7 @@
 # The model receives x_t = t * x_1 + (1 - t) * x_0 (x_1: VAE latent of an
 # image, x_0: Gaussian noise, t ~ U(0, 1 - eps)) and returns the rescaled
 # direction toward the data together with the predicted distance. The losses
-# are the one-step loss with inverse-squared-distance reweighting and the
+# are the one-step loss with weight 1 / (||x - s||^2 + eps) and the
 # directional eikonal loss of the paper.
 import torch
 

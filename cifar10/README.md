@@ -125,7 +125,7 @@ FID is computed with `torchmetrics.image.fid.FrechetInceptionDistance(normalize=
 - `--init_sigma s` / `--init_uniform r`: start sampling from `N(0, s^2 I)` or
   `Uniform(-r, r)` instead of `N(0, I)` (train/test mismatch study).
 - `--OS_loss_ablation` (training): one-step loss without the
-  inverse-squared-distance weight, the ablation in the paper.
+  weight `w = 1 / (||x - s||^2 + eps)`, the ablation in the paper.
 - The defaults of `train.py` / `sample.py` are the paper settings, so the
   model flags above can be omitted; `--dm_step_size` defaults to 0.031 for `st`
   and 0.46 for `gd`.

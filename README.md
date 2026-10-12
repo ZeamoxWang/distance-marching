@@ -46,10 +46,10 @@ direction `v_theta(x)`.
 Training pairs `(x, s)` are linear interpolations between Gaussian noise and a
 data sample `s`, without any re-matching. Two losses are used:
 
-* **One-step loss** `w * || x - u_theta(x) v_theta(x) - s ||^2` with the
-  inverse-squared-distance weight `w = 1 / (||x - s||^2 + eps)`, which emphasizes
-  the closest targets and removes the bias toward the data mean.
-* **Directional eikonal loss** `|| v_theta(x) - (x - s) / sqrt(||x - s||^2 + c_0) ||^2`,
+* **One-Step Loss** `w * || x - u_theta(x) v_theta(x) - s ||^2` with the
+  weight `w = 1 / (||x - s||^2 + eps)`, which emphasizes closer targets and
+  mitigates the bias toward the data mean.
+* **Directional Eikonal Loss** `|| v_theta(x) - (x - s) / sqrt(||x - s||^2 + c_0) ||^2`,
   which fixes the offset of the learned field.
 
 The learned field directly gives two deterministic samplers. Both start from
