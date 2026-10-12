@@ -1,74 +1,207 @@
 # Distance Marching for Generative Modeling
 
-Official implementation of **Distance Marching**, a generative model that
-explicitly learns a distance field of the data manifold and generates images
-without any time input. The negative gradient of the field gives the denoising
-direction and the predicted distance gives the step size, which yields two
-deterministic samplers: **sphere tracing** and **gradient descent**.
+<sub>Official PyTorch implementation</sub>
 
-The repository contains two self-contained codebases:
+### Paper (coming soon) | [Pretrained checkpoints](https://huggingface.co/zimowang/Distance-Marching)
 
-| Folder | Data | Backbone | Training | Inference |
-| --- | --- | --- | --- | --- |
-| [`cifar10/`](cifar10/) | CIFAR-10 32x32, unconditional | UNet (flow_matching CIFAR-10 preset) + distance head | `cifar10/train.py` | `cifar10/sample.py` |
-| [`imagenet/`](imagenet/) | ImageNet 256x256, class-conditional, latent space of SD-VAE | SiT-S/B/L/XL-2 + distance head | `imagenet/train.py` | `imagenet/sample.py` |
+Zimo Wang, Ishit Mehta, Haolin Lu, Xunpeng Huang, Chung-En Sun, Ge Yan, Tsui-Wei Weng, Tzu-Mao Li
+<br>UC San Diego
 
-Each folder has its own README with the exact commands, hyperparameters and
-reference numbers. Pretrained checkpoints are hosted at
-[`zimowang/Distance-Marching`](https://huggingface.co/zimowang/Distance-Marching)
-on Hugging Face and are downloaded automatically by the inference scripts.
+<p align="center">
+  <img src="assets/teaser.png" width="820">
+</p>
 
-| Checkpoint | Sampler | Steps | FID (50k), paper | FID (50k), this repo |
-| --- | --- | ---: | ---: | ---: |
-| `cifar10-checkpoint-1809.pth` | sphere tracing, step 0.031 | 250 | 2.23 | 2.24 |
-| `cifar10-checkpoint-1809.pth` | gradient descent, step 0.46 | 250 | 2.54 | 2.55 |
-| `imagenet-b2-0400000-ema.pt` (SiT-B/2, CFG 2.0) | sphere tracing, step 0.022 | 250 | 6.59 | 6.57 |
-| `imagenet-b2-0400000-ema.pt` (SiT-B/2, CFG 2.0) | gradient descent, step 0.64 | 250 | 6.67 | 6.63 |
+Diffusion and flow-matching models transport noise toward the data manifold
+without representing the manifold itself. **Distance Marching** explores the
+alternative: it explicitly learns a *distance field* of the data manifold, so
+that generation becomes a descent process that only needs the current position.
+The negative gradient of the field gives the denoising direction, the distance
+value gives the step size, and no time input is needed at all. As shown above,
+emphasizing closer targets during training keeps the trajectories from wandering
+toward the data mean early in sampling, which is what the flow-matching loss does.
 
-The paper column is the mean over three seeds; the last column is what the
-commands in this repository produce with seed 0 on one A100 (the paper's seed-0
-numbers are 2.23 / 2.55 / 6.56 / 6.62, so the remaining difference is GPU
-floating-point nondeterminism). The training scripts were also checked against
-the original runs: the CIFAR-10 per-epoch losses match to three decimals and the
-ImageNet losses over the first 3000 steps match within 2%.
+This repository contains:
 
-## Method in one paragraph
+* Two self-contained codebases: [`cifar10/`](cifar10/) (pixel space, UNet) and
+  [`imagenet/`](imagenet/) (latent space of SD-VAE, SiT backbone), each with
+  training, sampling and FID evaluation.
+* Pretrained checkpoints for CIFAR-10 and ImageNet 256x256 (SiT-B/2) on
+  [Hugging Face](https://huggingface.co/zimowang/Distance-Marching), downloaded
+  automatically by the sampling scripts.
+* The launch scripts and Kubernetes manifests used for the paper runs in
+  [`execute/`](execute/).
 
-Given a noisy point `x`, the model outputs a direction `v_theta(x)` and a
-distance `u_theta(x)`. Training pairs `(x, s)` are built by linear interpolation
-between Gaussian noise and a data sample `s`, without any re-matching. Two losses
-are used: the **one-step loss** `w * || x - u_theta(x) v_theta(x) - s ||^2` with
-the inverse-squared-distance weight `w = 1 / (||x - s||^2 + eps)`, which
-emphasizes closer targets, and the **directional eikonal loss**
-`|| v_theta(x) - (x - s) / sqrt(||x - s||^2 + c_0) ||^2`, which fixes the offset of
-the learned field. At inference, sphere tracing iterates
-`x <- x - eta * u_theta(x) * v_theta(x)` and gradient descent iterates
-`x <- x - eta * v_theta(x)` for a fixed number of steps.
+## Method
 
-## Quick start
+<p align="center">
+  <img src="assets/architecture.png" width="640">
+</p>
+
+The network takes only the (noisy) image `x` and an optional class label `y`. A
+light 2-layer CNN head predicts the distance `u_theta(x)` to the data manifold,
+and the backbone (the original U-Net or SiT) receives this prediction through
+the slot that normally takes the time embedding and outputs the denoising
+direction `v_theta(x)`.
+
+Training pairs `(x, s)` are linear interpolations between Gaussian noise and a
+data sample `s`, without any re-matching. Two losses are used:
+
+* **One-step loss** `w * || x - u_theta(x) v_theta(x) - s ||^2` with the
+  inverse-squared-distance weight `w = 1 / (||x - s||^2 + eps)`, which emphasizes
+  the closest targets and removes the bias toward the data mean.
+* **Directional eikonal loss** `|| v_theta(x) - (x - s) / sqrt(||x - s||^2 + c_0) ||^2`,
+  which fixes the offset of the learned field.
+
+The learned field directly gives two deterministic samplers. Both start from
+pure Gaussian noise and run a fixed number of steps with step size `eta`:
+
+| Sampler | Update | Step size (paper) |
+| --- | --- | --- |
+| Sphere tracing (`st`) | `x <- x - eta * u_theta(x) * v_theta(x)` | 0.031 (CIFAR-10), 0.022 (ImageNet) |
+| Gradient descent (`gd`) | `x <- x - eta * v_theta(x)` | 0.46 (CIFAR-10), 0.64 (ImageNet) |
+
+<p align="center">
+  <img src="assets/two_moons.png" width="820">
+</p>
+
+*Left:* on two moons the learned field `u_theta` (level sets, arrows show
+`-grad u_theta`) is a distance-like function to the data (orange). *Right:* sphere
+tracing moves samples from the initial noise (black) through intermediate
+states (yellow) onto the data support (blue).
+
+## Samples
+
+ImageNet 256x256, class-conditional, DM-XL/2 with CFG 4.0. Top: sphere tracing;
+bottom: gradient descent from the same initial noise.
+
+<p align="center">
+  <img src="assets/imagenet_sphere_tracing.jpg" width="100%">
+  <img src="assets/imagenet_gradient_descent.jpg" width="100%">
+</p>
+
+CIFAR-10, unconditional (no class and no time input), uncurated:
+
+<p align="center">
+  <img src="assets/cifar10_samples.png" width="620">
+</p>
+
+## Setup
+
+Each folder has its own `requirements.txt` (PyTorch 2.x, torchvision,
+torchmetrics for CIFAR-10 FID; diffusers, timm and TensorFlow for the ImageNet
+VAE and the ADM evaluator):
 
 ```bash
-# CIFAR-10: generate 50k images with sphere tracing and compute FID
-cd cifar10 && pip install -r requirements.txt
+git clone git@github.com:ZeamoxWang/distance-marching.git
+cd distance-marching
+pip install -r cifar10/requirements.txt    # pixel-space CIFAR-10 code
+pip install -r imagenet/requirements.txt   # latent-space ImageNet code
+```
+
+CIFAR-10 is downloaded by torchvision on first use. For ImageNet, unpack
+`ILSVRC2012_img_train.tar` into an `ImageFolder` layout with
+[`imagenet/prepare_imagenet.py`](imagenet/prepare_imagenet.py) (see the
+[ImageNet README](imagenet/README.md#data)).
+
+## Sampling
+
+**Pretrained checkpoints.** Both sampling scripts download the checkpoint from
+[`zimowang/Distance-Marching`](https://huggingface.co/zimowang/Distance-Marching)
+when `--ckpt` is not given.
+
+| Checkpoint | Dataset | Backbone | Sampler | Steps | FID-50k |
+| --- | --- | --- | --- | ---: | ---: |
+| `cifar10-checkpoint-1809.pth` | CIFAR-10 32x32 | UNet | `st`, step 0.031 | 250 | 2.23 |
+| `cifar10-checkpoint-1809.pth` | CIFAR-10 32x32 | UNet | `gd`, step 0.46 | 250 | 2.54 |
+| `imagenet-b2-0400000-ema.pt` | ImageNet 256x256 | SiT-B/2, CFG 2.0 | `st`, step 0.022 | 250 | 6.59 |
+| `imagenet-b2-0400000-ema.pt` | ImageNet 256x256 | SiT-B/2, CFG 2.0 | `gd`, step 0.64 | 250 | 6.67 |
+
+CIFAR-10: generate 50k images with sphere tracing and compute FID against the
+training set (switch to `--dm_method gd --dm_step_size 0.46` for gradient
+descent):
+
+```bash
+cd cifar10
 python sample.py --use_ema --separate_t --max_period 1000000 --unified_scale 120.0 \
     --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 \
     --compute_fid --fid_samples 50000 --batch_size 128 --seed 0 --output_dir ./samples_st
-
-# ImageNet-256 (SiT-B/2): generate 50k images with sphere tracing and compute FID
-cd imagenet && pip install -r requirements.txt
-torchrun --nproc_per_node=1 sample.py --model DM-B/2 --sampler st --stepsize 0.022 \
-    --cfg-scale 2.0 --num-sampling-steps 250 --num-fid-samples 50000 --global-seed 0
 ```
 
-## Repository layout
+ImageNet 256x256 (SiT-B/2): generate 50k images and pack them into an `.npz`
+(switch to `--sampler gd --stepsize 0.64` for gradient descent; use more
+processes to split the samples over GPUs):
 
+```bash
+cd imagenet
+torchrun --nnodes=1 --nproc_per_node=1 sample.py --model DM-B/2 --sampler st --stepsize 0.022 \
+    --cfg-scale 2.0 --num-sampling-steps 250 --num-fid-samples 50000 \
+    --global-batch-size 256 --global-seed 0 --folder samples_st
 ```
-distance-marching/
-├── cifar10/        # pixel-space CIFAR-10 code (training + inference)
-├── imagenet/       # latent-space ImageNet code (training + inference)
-├── execute/        # launch scripts and Kubernetes (Nautilus) manifests used for the paper runs
-└── LICENSE
+
+Classifier-free guidance is applied to `v_theta` in gradient descent and to
+`u_theta v_theta` in sphere tracing. See the folder READMEs for the other sizes
+(S/2, L/2, XL/2), multi-GPU sampling and the remaining options.
+
+## Training
+
+CIFAR-10, paper configuration (4 x A100 80GB, batch 128 per GPU, 3000 epochs):
+
+```bash
+cd cifar10
+torchrun --nproc_per_node=4 train.py \
+    --data_path ./data --batch_size 128 --epochs 3000 \
+    --lr 1e-4 --optimizer_betas 0.9 0.95 --class_drop_prob 1.0 --cfg_scale 0.0 \
+    --use_ema --ema_decay 0.999 --skewed_timesteps \
+    --separate_t --max_period 1000000 --unified_scale 120.0 \
+    --c 4.0 --w_os 0.1 --w_de 1.0 \
+    --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+    --compute_fid --fid_samples 1024 --eval_frequency 10 \
+    --timestamp --output_dir ./output_dir
 ```
+
+ImageNet 256x256, DM-B/2, paper configuration (4 x A100 80GB, global batch 256,
+80 epochs = 400k steps):
+
+```bash
+cd imagenet
+torchrun --nnodes=1 --nproc_per_node=4 train.py \
+    --model DM-B/2 --data-path /path/to/imagenet/train \
+    --global-batch-size 256 --epochs 80 --global-seed 0 \
+    --lr 1e-4 --ema-decay 0.9999 --class-dropout-prob 0.1 \
+    --rescale-energy 2.78e-3 --one-step-loss-weight 1.0 --eikonal-loss-weight 30.0 --c 100.0 \
+    --num-workers 8 --log-every 100 --ckpt-every 50000 --results-dir results
+```
+
+Both scripts write checkpoints and a `log.txt` with the per-epoch (CIFAR-10) or
+per-100-step (ImageNet) losses; resume with `--resume` / `--ckpt`. The full set
+of hyperparameters is listed in [`cifar10/README.md`](cifar10/README.md#training)
+and [`imagenet/README.md`](imagenet/README.md#training).
+
+## Evaluation
+
+CIFAR-10 FID is computed inside `sample.py` with
+`torchmetrics.image.fid.FrechetInceptionDistance` against the 50k training
+images. For ImageNet, run the ADM evaluation suite on the `.npz` written by
+`sample.py` against the reference batch
+[`VIRTUAL_imagenet256_labeled.npz`](https://openaipublic.blob.core.windows.net/diffusion/jul-2021/ref_batches/imagenet/256/VIRTUAL_imagenet256_labeled.npz)
+to get FID, sFID, Inception Score, precision and recall:
+
+```bash
+cd imagenet
+python evaluator.py VIRTUAL_imagenet256_labeled.npz samples_st/<run>/samples.npz
+```
+
+## Distance prediction
+
+<p align="center">
+  <img src="assets/distance_vs_steps.png" width="560">
+</p>
+
+Because the model predicts the distance to the manifold at every step, the
+prediction itself tells when sampling has converged: `u_theta` settles at
+`sqrt(c_0)`, its value on the data, well before the 250 steps are used up
+(ImageNet, 64 initial noise vectors shown above). This allows early stopping,
+and out-of-distribution inputs show up as large predicted distances.
 
 ## Citation
 
