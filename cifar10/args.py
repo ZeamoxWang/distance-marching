@@ -6,7 +6,6 @@
 #
 # Command-line arguments shared by train.py and sample.py.
 import argparse
-import json
 
 
 def add_model_args(parser: argparse.ArgumentParser) -> None:
@@ -14,28 +13,22 @@ def add_model_args(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--use_ema",
         action="store_true",
-        help="Keep an EMA copy of the weights and use it for evaluation.",
+        default=True,
+        help="Keep an EMA copy of the weights and use it for evaluation (always on; the "
+        "released checkpoint is EMA-wrapped). Kept for backward compatibility.",
     )
     group.add_argument("--ema_decay", type=float, default=0.999, help="EMA decay.")
     group.add_argument(
-        "--separate_t",
-        action="store_true",
-        help="Predict the distance with a separate tiny CNN head (the paper setting) "
-        "instead of differentiating a scalar field.",
-    )
-    group.add_argument(
         "--unified_scale",
-        default=1.0,
+        default=120.0,
         type=float,
-        help="The UNet output is divided by this value to obtain the direction v_theta "
-        "(paper: 120.0).",
+        help="The UNet output is divided by this value to obtain the direction v_theta.",
     )
     group.add_argument(
         "--max_period",
-        default=10000,
+        default=1000000.0,
         type=float,
-        help="Maximum period of the sinusoidal embedding fed by the distance head "
-        "(paper: 1000000).",
+        help="Maximum period of the sinusoidal embedding fed by the distance head.",
     )
 
 
@@ -43,54 +36,22 @@ def add_sampling_args(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("sampling")
     group.add_argument(
         "--dm_method",
-        default="gd",
+        default="st",
         type=str,
-        choices=["gd", "st", "gd_ula", "st_ula"],
-        help="'gd' gradient descent, 'st' sphere tracing; '*_ula' adds annealed Langevin noise.",
+        choices=["st", "gd"],
+        help="'st' sphere tracing, 'gd' gradient descent.",
     )
     group.add_argument(
         "--dm_step_size",
         default=None,
         type=float,
-        required=False,
-        help="Step size eta (paper: 0.031 for st, 0.46 for gd).",
-    )
-    group.add_argument(
-        "--dm_criteria",
-        default="fixed_steps",
-        type=str,
-        choices=["fixed_steps", "grad_norm", "dist_value", "step_norm"],
-        help="Stopping criterion. 'fixed_steps' always takes --nfe steps.",
-    )
-    group.add_argument(
-        "--dm_threshold",
-        default=1e-5,
-        type=float,
-        help="Threshold for the adaptive stopping criteria.",
-    )
-    group.add_argument(
-        "--dm_ula_schedule",
-        default=None,
-        type=json.loads,
-        help='Sigma schedule for the *_ula methods as a JSON dict {progress: sigma}, '
-        'e.g. \'{"0.0": 1.0, "0.3": 0.2, "0.9": 0.01, "1.0": 0.0}\'.',
+        help="Step size eta. Defaults to the paper values: 0.031 for st, 0.46 for gd.",
     )
     group.add_argument(
         "--nfe",
         default=250,
         type=int,
-        help="Number of marching steps (with --edm_schedule the EDM time grid has nfe points).",
-    )
-    group.add_argument(
-        "--edm_schedule",
-        action="store_true",
-        help="Use the EDM time discretization for the sampling grid (only its length matters).",
-    )
-    group.add_argument(
-        "--cfg_scale",
-        default=0.0,
-        type=float,
-        help="Classifier-free guidance scale (CIFAR-10 models are unconditional: keep 0.0).",
+        help="Number of marching steps.",
     )
     group.add_argument(
         "--init_sigma",
@@ -142,13 +103,6 @@ def add_data_args(parser: argparse.ArgumentParser) -> None:
         help="Batch size per GPU (effective batch size is batch_size * accum_iter * #GPUs).",
     )
     group.add_argument("--num_workers", default=10, type=int)
-    group.add_argument(
-        "--pin_mem",
-        action="store_true",
-        help="Pin CPU memory in the DataLoader.",
-    )
-    group.add_argument("--no_pin_mem", action="store_false", dest="pin_mem")
-    parser.set_defaults(pin_mem=True)
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -163,18 +117,23 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Append YYYYMMDD_HHMMSS to --output_dir.",
     )
-    group.add_argument("--device", default="cuda", help="Device to use.")
     group.add_argument("--seed", default=0, type=int)
     group.add_argument(
         "--test_run",
         action="store_true",
         help="Run a single batch of training and evaluation (smoke test).",
     )
-    # distributed training parameters (torchrun sets the environment variables)
-    group.add_argument("--world_size", default=1, type=int, help="number of distributed processes")
-    group.add_argument("--local_rank", default=-1, type=int)
-    group.add_argument("--dist_on_itp", action="store_true")
-    group.add_argument("--dist_url", default="env://", help="url used to set up distributed training")
+
+
+DEFAULT_STEP_SIZE = {"st": 0.031, "gd": 0.46}
+
+
+def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
+    """Fill in values that depend on other arguments."""
+    if args.dm_step_size is None:
+        args.dm_step_size = DEFAULT_STEP_SIZE[args.dm_method]
+    args.start_epoch = 0  # overwritten by load_model() when resuming
+    return args
 
 
 def get_train_args_parser() -> argparse.ArgumentParser:
@@ -209,7 +168,9 @@ def get_train_args_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skewed_timesteps",
         action="store_true",
-        help="Sample the interpolation coefficient from the EDM log-normal distribution.",
+        default=True,
+        help="Sample the interpolation coefficient from the EDM log-normal distribution "
+        "(always on, the paper setting). Kept for backward compatibility.",
     )
     parser.add_argument(
         "--close_amp",
@@ -219,10 +180,10 @@ def get_train_args_parser() -> argparse.ArgumentParser:
     # Distance Marching losses
     parser.add_argument(
         "--c",
-        default=16.0,
+        default=4.0,
         type=float,
         help="Smoothing constant: epsilon in the one-step loss and c_0 in the directional "
-        "eikonal loss (paper: 4.0).",
+        "eikonal loss.",
     )
     parser.add_argument("--w_de", default=1.0, type=float, help="Weight of the directional eikonal loss.")
     parser.add_argument("--w_os", default=0.1, type=float, help="Weight of the one-step loss.")
@@ -233,18 +194,11 @@ def get_train_args_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--eval_frequency",
-        default=50,
+        default=10,
         type=int,
         help="Run FID evaluation (and save a checkpoint) every N epochs. -1 disables it.",
     )
     parser.add_argument("--resume", default="", help="Checkpoint to resume training from.")
-    parser.add_argument(
-        "--start_epoch",
-        default=0,
-        type=int,
-        metavar="N",
-        help="Start epoch (set automatically when resuming).",
-    )
     add_model_args(parser)
     add_sampling_args(parser)
     add_eval_args(parser)

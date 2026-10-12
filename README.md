@@ -122,8 +122,8 @@ descent):
 
 ```bash
 cd cifar10
-python sample.py --use_ema --separate_t --max_period 1000000 --unified_scale 120.0 \
-    --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 \
+python sample.py --use_ema --max_period 1000000 --unified_scale 120.0 \
+    --nfe 250 --dm_method st --dm_step_size 0.031 \
     --compute_fid --fid_samples 50000 --batch_size 128 --seed 0 --output_dir ./samples_st
 ```
 
@@ -150,11 +150,11 @@ CIFAR-10, paper configuration (4 x A100 80GB, batch 128 per GPU, 3000 epochs):
 cd cifar10
 torchrun --nproc_per_node=4 train.py \
     --data_path ./data --batch_size 128 --epochs 3000 \
-    --lr 1e-4 --optimizer_betas 0.9 0.95 --class_drop_prob 1.0 --cfg_scale 0.0 \
+    --lr 1e-4 --optimizer_betas 0.9 0.95 --class_drop_prob 1.0 \
     --use_ema --ema_decay 0.999 --skewed_timesteps \
-    --separate_t --max_period 1000000 --unified_scale 120.0 \
+    --max_period 1000000 --unified_scale 120.0 \
     --c 4.0 --w_os 0.1 --w_de 1.0 \
-    --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+    --nfe 250 --dm_method st --dm_step_size 0.031 \
     --compute_fid --fid_samples 1024 --eval_frequency 10 \
     --timestamp --output_dir ./output_dir
 ```

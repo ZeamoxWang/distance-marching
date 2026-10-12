@@ -97,8 +97,6 @@ def main(args):
     model = DM_models[args.model](
         input_size=latent_size,
         num_classes=args.num_classes,
-        uncond=False,
-        ebm="none",
         rescale_energy=args.rescale_energy,
         noise_predictor_condition=args.noise_predictor_condition,
     ).to(device)
@@ -225,7 +223,9 @@ if __name__ == "__main__":
     parser.add_argument("--num-fid-samples", type=int, default=50000)
     parser.add_argument("--folder", type=str, default="samples", help="Output folder (a timestamped subfolder is created).")
     parser.add_argument("--tmp-dir", type=str, default="/tmp/dm_samples", help="Local scratch folder for intermediate PNGs.")
-    parser.add_argument("--rescale-energy", type=float, default=2.78e-3, help="Overridden by the checkpoint's training args.")
-    parser.add_argument("--noise-predictor-condition", type=lambda x: (str(x).lower() in ["true", "1", "yes"]), default=True)
     args = parser.parse_args()
+    # Model settings of the paper runs; overridden by the training args stored in
+    # the checkpoint (the released checkpoints store the same values).
+    args.rescale_energy = 2.78e-3
+    args.noise_predictor_condition = True
     main(args)

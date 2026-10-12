@@ -209,9 +209,7 @@ class DistanceMarchingSiT(nn.Module):
         class_dropout_prob=0.1,
         num_classes=1000,
         learn_sigma=True,
-        uncond=True,
         rescale_energy=1.0,
-        ebm='none',
         noise_predictor_condition=True
     ):
         super().__init__()
@@ -234,15 +232,10 @@ class DistanceMarchingSiT(nn.Module):
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.initialize_weights()
-        self.uncond = uncond
-        if not self.uncond:
-            self.noise_level_predictor = NoiseLevelPredictor(in_channels, num_classes, class_dropout_prob, condition=noise_predictor_condition)
-            # print the number of parameters in the noise level predictor
-            print(f"Number of parameters in the noise level predictor: {sum(p.numel() for p in self.noise_level_predictor.parameters())}")
-        self.ebm = ebm
-        
-        # if self.ebm != 'none':
-        #     assert self.uncond == True, "uncond must be True when ebm is not none"
+        # Distance head u_theta. Created after initialize_weights() so that the
+        # random initialization matches the original runs.
+        self.noise_level_predictor = NoiseLevelPredictor(in_channels, num_classes, class_dropout_prob, condition=noise_predictor_condition)
+        print(f"Number of parameters in the noise level predictor: {sum(p.numel() for p in self.noise_level_predictor.parameters())}")
 
     def initialize_weights(self):
         # Initialize transformer layers:
@@ -295,83 +288,51 @@ class DistanceMarchingSiT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
 
-    def forward(self, x0, t, y, return_act=False, get_energy=False, train=False):
+    def forward(self, x0, t, y, get_energy=False):
         """
         Forward pass of the Distance Marching SiT.
-        x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
-        t: (N,) tensor of diffusion timesteps
+        x0: (N, C, H, W) tensor of spatial inputs (latent representations of images)
+        t: (N,) placeholder, ignored (the model has no time input)
         y: (N,) tensor of class labels
+        Returns the rescaled direction v_theta(x) and, with get_energy=True, also
+        -u_theta(x), the negated predicted distance.
         """
         x0.requires_grad_(True)
-            
-        if self.uncond: # removes noise/time conditioning by setting to 0
-            t = torch.zeros_like(t)
-        else:
-            # always neglect the t
-            dist = self.noise_level_predictor(x0, y, self.training)
-            t = dist / 100.0
-        act = []
+
+        # The predicted distance replaces the time input of SiT.
+        dist = self.noise_level_predictor(x0, y, self.training)
+        t = dist / 100.0
         x = self.x_embedder(x0) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y                                # (N, D)
         for block in self.blocks:
             x = block(x, c)                      # (N, T, D)
-            act.append(x)
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
         if self.learn_sigma:
             x, _ = x.chunk(2, dim=1)
 
-        # explicit energy
-        E=0
-        if self.ebm == 'l2':
-            E = -torch.sum(x**2, dim=(1,2,3))/2
-            E = E * self.rescale_energy
-            #if E.requires_grad: it must be True
-            x = torch.autograd.grad([E.sum()],[x0],create_graph=train)[0] 
-        if self.ebm == 'dot':
-            E = torch.sum(x*x0, dim=(1,2,3))
-            E = E * self.rescale_energy
-            #if E.requires_grad: it must be True
-            x = torch.autograd.grad([E.sum()],[x0],create_graph=train)[0]
-        if self.ebm == 'mean':
-            E = torch.sum(x*x0, dim=(1,2,3))
-            E = E * self.rescale_energy
-            #if E.requires_grad: it must be True
-            x = torch.autograd.grad([E.sum()],[x0],create_graph=train)[0]
-        if self.ebm == 'none' and self.uncond == False: # separate-t is True
-            E = dist # do not rescale the scaler, only rescale the vector
-            x = x * self.rescale_energy
+        E = dist  # the distance is not rescaled, only the direction is
+        x = x * self.rescale_energy
 
         if get_energy:
             return x, -E
-            # When training with the DIST model,
-            # we need to flip the x, but keep the energy;
-            # When sampling, the lr should be negative
-        if return_act: 
-            return x, act
+            # When training, the direction is flipped but the distance is kept;
+            # when sampling, the step size is applied with a positive sign.
         return x
 
-    def forward_with_cfg(self, x, t, y, cfg_scale, return_act=False, get_energy=False, train=False):
+    def forward_with_cfg(self, x, t, y, cfg_scale, get_energy=False):
         """
         Forward pass of the Distance Marching SiT, but also batches the uncondional forward pass for classifier-free guidance.
         """
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
-        model_out = self.forward(combined, t, y, return_act=return_act, get_energy=get_energy, train=train)
+        model_out = self.forward(combined, t, y, get_energy=get_energy)
         if get_energy:
             x, E = model_out
             model_out=x
-        if return_act:
-            act = model_out[1]
-            model_out = model_out[0]
-            eps, rest = model_out[:, :3], model_out[:, 3:]
-            cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
-            half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
-            eps = torch.cat([half_eps, half_eps], dim=0)
-            return torch.cat([eps, rest], dim=1), act
         # For exact reproducibility reasons, we apply classifier-free guidance on only
         # three channels by default. The standard approach to cfg applies it to all channels.
         # This can be done by uncommenting the following line and commenting-out the line following that.

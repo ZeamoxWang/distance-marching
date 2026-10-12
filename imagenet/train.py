@@ -160,8 +160,6 @@ def main(args):
         input_size=latent_size,
         num_classes=args.num_classes,
         class_dropout_prob=args.class_dropout_prob,
-        uncond=False,  # the distance head provides the (time-free) conditioning
-        ebm="none",
         rescale_energy=args.rescale_energy,
         noise_predictor_condition=args.noise_predictor_condition,
     ).to(device)
@@ -335,10 +333,12 @@ if __name__ == "__main__":
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50000)
     parser.add_argument("--rescale-energy", type=float, default=2.78e-3, help="Rescaling of the predicted direction (paper: 2.78e-3).")
-    parser.add_argument("--noise-predictor-condition", type=lambda x: (str(x).lower() in ["true", "1", "yes"]), default=True, help="Condition the distance head on the class label.")
     parser.add_argument("--one-step-loss-weight", type=float, default=1.0, help="lambda_OS")
     parser.add_argument("--eikonal-loss-weight", type=float, default=30.0, help="lambda_DE")
     parser.add_argument("--c", type=float, default=100.0, help="epsilon in the one-step loss and c_0 in the eikonal loss")
     parser.add_argument("--ckpt", type=str, default=None, help="Checkpoint to resume from.")
     args = parser.parse_args()
+    # The distance head is always conditioned on the class label (paper setting);
+    # stored in the checkpoint args so that sample.py rebuilds the same model.
+    args.noise_predictor_condition = True
     main(args)

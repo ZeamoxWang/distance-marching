@@ -13,27 +13,15 @@ from typing import Iterable
 
 import numpy as np
 import torch
-from dm.solver import build_sigma_schedule, DistanceMarchingSolver
+from dm.solver import DistanceMarchingSolver
 from torch.nn.parallel import DistributedDataParallel
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchvision.utils import save_image
 from training import distributed_mode
-from training.edm_time_discretization import get_time_discretization
 
 logger = logging.getLogger(__name__)
 
 PRINT_FREQUENCY = 50
-
-
-def get_sampling_time_grid(args: Namespace, device: torch.device) -> torch.Tensor:
-    """Time grid whose length - 1 is the number of marching steps.
-
-    With ``--edm_schedule`` the EDM discretization with ``args.nfe`` points is used
-    (``args.nfe`` steps); otherwise a single step [0, 1].
-    """
-    if args.edm_schedule:
-        return get_time_discretization(nfes=args.nfe)
-    return torch.tensor([0.0, 1.0], device=device)
 
 
 def sample_initial_state(shape, device: torch.device, args: Namespace) -> torch.Tensor:
@@ -63,26 +51,17 @@ def eval_model(
 
     All processes generate images; the FID statistics are synchronized across
     processes by torchmetrics. Only the main process writes snapshots, the
-    ``fid_samples.npy`` memmap and the marching statistics.
+    ``fid_samples.npy`` memmap.
     """
     gc.collect()
 
     model.train(False)
 
-    solver = DistanceMarchingSolver(
-        velocity_model=model,
-        output_dir=args.output_dir if hasattr(args, "output_dir") else None,
-        is_main_process=distributed_mode.is_main_process(),
-    )
+    solver = DistanceMarchingSolver(velocity_model=model)
 
     fid_metric = FrechetInceptionDistance(normalize=True).to(
         device=device, non_blocking=True
     )
-
-    ula_schedule = None
-    if args.dm_method in ["gd_ula", "st_ula"] and getattr(args, "dm_ula_schedule", None) is not None:
-        raw = {float(k): float(v) for k, v in args.dm_ula_schedule.items()}
-        ula_schedule = build_sigma_schedule(raw)
 
     num_synthetic = 0
     fid_samples_memmap = None
@@ -90,26 +69,18 @@ def eval_model(
     if args.output_dir and distributed_mode.is_main_process():
         (Path(args.output_dir) / "snapshots").mkdir(parents=True, exist_ok=True)
 
-    for data_iter_step, (samples, labels) in enumerate(data_loader):
+    for data_iter_step, (samples, _) in enumerate(data_loader):
         samples = samples.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
         fid_metric.update(samples, real=True)
 
         if num_synthetic < fid_samples:
             x_0 = sample_initial_state(samples.shape, device=device, args=args)
-            time_grid = get_sampling_time_grid(args, device)
 
             synthetic_samples = solver.sample(
                 x_init=x_0,
                 step_size=args.dm_step_size,
                 method=args.dm_method,
-                criteria=args.dm_criteria,
-                threshold=args.dm_threshold,
-                time_grid=time_grid,
-                return_intermediates=False,
-                ula_schedule=ula_schedule,
-                label=labels,
-                cfg_scale=args.cfg_scale,
+                num_steps=args.nfe,
             )
 
             # Scaling to [0, 1] from [-1, 1], then quantize to uint8 levels

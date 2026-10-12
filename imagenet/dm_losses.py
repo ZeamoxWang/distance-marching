@@ -49,7 +49,7 @@ def training_losses(
     """
     t, x0, xt, ut = sample_path(x1, train_eps=train_eps)
 
-    model_output, dist = model(xt, t, y=y, train=True, get_energy=True)
+    model_output, dist = model(xt, t, y=y, get_energy=True)
     # the gradients in the DIST model should point towards the noise
     model_output = -model_output
 

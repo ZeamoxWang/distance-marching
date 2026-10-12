@@ -65,11 +65,11 @@ spec:
               mkdir -p /nvme/data && cp /pv/flow_matching/data/cifar-10-python.tar.gz /nvme/data/
               torchrun --nproc_per_node=4 train.py --data_path /nvme/data \
                 --batch_size 128 --accum_iter 1 --epochs "$EPOCHS" --num_workers 10 \
-                --lr 1e-4 --optimizer_betas 0.9 0.95 --class_drop_prob 1.0 --cfg_scale 0.0 \
+                --lr 1e-4 --optimizer_betas 0.9 0.95 --class_drop_prob 1.0 \
                 --use_ema --ema_decay 0.999 --skewed_timesteps \
-                --separate_t --max_period 1000000 --unified_scale 120.0 \
+                --max_period 1000000 --unified_scale 120.0 \
                 --c 4.0 --w_os 0.1 --w_de 1.0 \
-                --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.03 --dm_criteria fixed_steps \
+                --nfe 250 --dm_method st --dm_step_size 0.03 \
                 --compute_fid --fid_samples 1024 --eval_frequency 10 --seed 0 \
                 --output_dir "$RUN/train" 2>&1 | tee "$RUN/train.log"
               echo "TRAIN DONE"

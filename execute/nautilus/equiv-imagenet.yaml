@@ -1,0 +1,137 @@
+# Equivalence test for the ImageNet code clean-up, on 1 x A100 in one pod.
+# OLD = commit 67ead93 (before the clean-up), NEW = the checked-out commit.
+# OLD runs twice (measures GPU run-to-run noise), NEW once:
+#   1. sampling from the HF B/2 checkpoint, 64 images, CFG 2.0, 250 steps, st and gd;
+#   2. training B/2 for 300 steps (global batch 64) on a 10-class ImageNet
+#      subset through torchrun (1 process), checkpoint at step 300.
+# compare.py prints per-test verdicts (IDENTICAL / WITHIN RUN-TO-RUN NOISE / LARGER).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-equiv-imagenet-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-equiv-imagenet-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 172800  # counts queue time too
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-equiv-imagenet-1
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-80GB
+                  # node whose CephFS CSI driver broke mid-run on 2026-10-10
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - gp-engine.usd.edu
+      containers:
+        - name: compute
+          image: zeamoxwang/eqm-a10@sha256:4295547d158ed67d6e6aa7fdd4a7b8c5efd464428e7ac591a099fe856e84a7cd  # :latest amd64 2025-11-01
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-equiv-imagenet-1
+            - name: OLD_COMMIT
+              value: 67ead936da2bc92fb39d15922e6aa6c27d2b153b
+            - name: HF_HOME
+              value: /nvme/hf
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              nvidia-smi
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              OUT=/nvme/out
+              mkdir -p "$RUN" "$OUT" /nvme/old /nvme/tmp
+              cp -r /pv/distance-marching /nvme/new
+              NEW_COMMIT=$(git -C /nvme/new rev-parse HEAD)
+              git -C /nvme/new archive "$OLD_COMMIT" | tar -x -C /nvme/old
+              echo "OLD $OLD_COMMIT NEW $NEW_COMMIT" | tee "$RUN/commits.txt"
+              python3 -c "import torch, diffusers, timm; print(torch.__version__, diffusers.__version__, timm.__version__)" | tee "$RUN/versions.txt"
+
+              echo "=== 1. sampling"
+              for m in st gd; do
+                if [ $m = st ]; then STEP=0.022; else STEP=0.64; fi
+                for r in old_a old_b new; do
+                  if [ $r = new ]; then CODE=/nvme/new; else CODE=/nvme/old; fi
+                  (cd $CODE/imagenet && torchrun --nnodes=1 --nproc_per_node=1 sample.py \
+                    --model DM-B/2 --sampler $m --stepsize $STEP --cfg-scale 2.0 \
+                    --num-sampling-steps 250 --num-fid-samples 64 --global-batch-size 64 --global-seed 0 \
+                    --folder $OUT/sample_${m}_$r --tmp-dir /nvme/tmp/sample_${m}_$r) > $RUN/sample_${m}_$r.log 2>&1
+                done
+              done
+
+              echo "=== 2. training (300 steps, 10 classes, torchrun 1 process)"
+              mkdir -p /nvme/imagenet10/train && cd /nvme/imagenet10/train
+              tar --occurrence=1 -xf /pv/EqM/ILSVRC2012_img_train.tar $(tar -tf /pv/EqM/ILSVRC2012_img_train.tar | head -10)
+              for t in *.tar; do d="${t%.tar}"; mkdir -p "$d"; tar -xf "$t" -C "$d"; rm "$t"; done
+              ls | wc -l
+              for r in old_a old_b new; do
+                if [ $r = new ]; then CODE=/nvme/new; else CODE=/nvme/old; fi
+                (cd $CODE/imagenet && torchrun --nnodes=1 --nproc_per_node=1 train.py \
+                  --model DM-B/2 --data-path /nvme/imagenet10/train \
+                  --global-batch-size 64 --epochs 80 --max-steps 300 --global-seed 0 \
+                  --lr 1e-4 --ema-decay 0.9999 --class-dropout-prob 0.1 \
+                  --rescale-energy 2.78e-3 --one-step-loss-weight 1.0 --eikonal-loss-weight 30.0 --c 100.0 \
+                  --num-workers 8 --log-every 50 --ckpt-every 300 \
+                  --results-dir $OUT/train_$r) > $RUN/train_$r.log 2>&1
+              done
+
+              echo "=== 3. compare"
+              C="python3 /nvme/new/execute/equivalence/compare.py"
+              {
+                for m in st gd; do
+                  echo "--- sampling $m"
+                  $C images $OUT/sample_${m}_old_a/*/samples.npz $OUT/sample_${m}_old_b/*/samples.npz $OUT/sample_${m}_new/*/samples.npz
+                done
+                echo "--- training losses"
+                $C imagenetlog $OUT/train_old_a/*/log.txt $OUT/train_old_b/*/log.txt $OUT/train_new/*/log.txt
+                echo "--- training weights (step 300, model and ema)"
+                $C ckpt $OUT/train_old_a/*/checkpoints/0000300.pt $OUT/train_old_b/*/checkpoints/0000300.pt $OUT/train_new/*/checkpoints/0000300.pt
+              } 2>&1 | tee $RUN/compare.txt
+              for r in old_a old_b new; do mkdir -p $RUN/train_$r && cp $OUT/train_$r/*/log.txt $RUN/train_$r/; done
+              echo "EQUIV DONE"
+          resources:
+            requests:
+              cpu: "8"
+              memory: 64Gi
+              ephemeral-storage: 100Gi
+              nvidia.com/a100: 1
+            limits:
+              cpu: "8"
+              memory: 64Gi
+              ephemeral-storage: 100Gi
+              nvidia.com/a100: 1
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+            - name: nvme
+              mountPath: /nvme
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
+        - name: nvme
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi

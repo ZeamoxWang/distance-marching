@@ -59,13 +59,13 @@ spec:
               python3 -c "import torch, torchmetrics, torchvision; print(torch.__version__, torchvision.__version__, torchmetrics.__version__)" | tee "$RUN/versions.txt"
               mkdir -p /nvme/data && cp /pv/flow_matching/data/cifar-10-python.tar.gz /nvme/data/
               python3 train.py --test_run --data_path /nvme/data --batch_size 128 --num_workers 8 \
-                --use_ema --ema_decay 0.999 --separate_t --max_period 1000000 --unified_scale 120.0 \
-                --c 4.0 --w_os 0.1 --w_de 1.0 --skewed_timesteps --class_drop_prob 1.0 --cfg_scale 0.0 \
-                --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+                --use_ema --ema_decay 0.999 --max_period 1000000 --unified_scale 120.0 \
+                --c 4.0 --w_os 0.1 --w_de 1.0 --skewed_timesteps --class_drop_prob 1.0 \
+                --nfe 250 --dm_method st --dm_step_size 0.031 \
                 --compute_fid --fid_samples 128 --seed 0 --output_dir "$RUN/train_smoke" 2>&1 | tee "$RUN/train_smoke.log"
               python3 sample.py --data_path /nvme/data --batch_size 128 --num_workers 8 \
-                --use_ema --separate_t --max_period 1000000 --unified_scale 120.0 \
-                --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+                --use_ema --max_period 1000000 --unified_scale 120.0 \
+                --nfe 250 --dm_method st --dm_step_size 0.031 \
                 --compute_fid --fid_samples 256 --save_fid_samples --seed 0 --test_run \
                 --output_dir "$RUN/sample_smoke" 2>&1 | tee "$RUN/sample_smoke.log"
               echo "SMOKE DONE"

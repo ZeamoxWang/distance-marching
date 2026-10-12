@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
-from args import get_sample_args_parser
+from args import finalize_args, get_sample_args_parser
 from train import build_dataloader, build_model, fid_samples_for_this_rank, setup_logging
 
 from training import distributed_mode
@@ -51,7 +51,7 @@ def main(args):
         with open(Path(args.output_dir) / "args.json", "w") as f:
             json.dump(vars(args), f)
 
-    device = torch.device(args.device)
+    device = torch.device("cuda")
 
     # fix the seed for reproducibility (per rank, as in train.py)
     seed = args.seed + distributed_mode.get_rank()
@@ -91,7 +91,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    args = get_sample_args_parser().parse_args()
+    args = finalize_args(get_sample_args_parser().parse_args())
     if args.output_dir and args.timestamp:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         args.output_dir = str(Path(args.output_dir) / timestamp)

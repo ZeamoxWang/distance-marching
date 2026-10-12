@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torchvision.datasets as datasets
-from args import get_train_args_parser
+from args import finalize_args, get_train_args_parser
 from models.model_configs import instantiate_model
 
 from training import distributed_mode
@@ -67,7 +67,7 @@ def build_dataloader(args):
         sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
+        pin_memory=True,
         drop_last=True,
     )
     if distributed_mode.is_main_process():
@@ -79,7 +79,6 @@ def build_model(args, device):
     model = instantiate_model(
         architechture="cifar10",
         use_ema=args.use_ema,
-        separate_t=args.separate_t,
         max_period=args.max_period,
         unified_scale=args.unified_scale,
         ema_decay=args.ema_decay,
@@ -123,7 +122,7 @@ def main(args):
         with open(args_filepath, "w") as f:
             json.dump(vars(args), f)
 
-    device = torch.device(args.device)
+    device = torch.device("cuda")
 
     # fix the seed for reproducibility
     seed = args.seed + distributed_mode.get_rank()
@@ -234,7 +233,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    args = get_train_args_parser().parse_args()
+    args = finalize_args(get_train_args_parser().parse_args())
     if args.output_dir and args.timestamp:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         args.output_dir = str(Path(args.output_dir) / timestamp)

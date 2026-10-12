@@ -1,0 +1,149 @@
+# Equivalence test for the CIFAR-10 code clean-up, on 1 x A100 in one pod.
+# OLD = commit 67ead93 (before the clean-up), NEW = the checked-out commit.
+# OLD runs twice (measures GPU run-to-run noise), NEW once with the new
+# defaults (no model flags):
+#   1. sampling, one batch of 128 images from the HF checkpoint, st and gd;
+#   2. training, 3 epochs from scratch through torchrun (1 process), with a
+#      checkpoint + 128-sample generation at the last epoch.
+# compare.py prints per-test verdicts (IDENTICAL / WITHIN RUN-TO-RUN NOISE / LARGER).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zimo-dm-equiv-cifar10-1
+  namespace: ucsd-ravigroup
+  labels:
+    owner: zimo
+    project: distance-marching
+    run-id: zimo-dm-equiv-cifar10-1
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 172800  # counts queue time too
+  ttlSecondsAfterFinished: 172800
+  template:
+    metadata:
+      labels:
+        owner: zimo
+        project: distance-marching
+        run-id: zimo-dm-equiv-cifar10-1
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                      - NVIDIA-A100-SXM4-80GB
+                  # node whose CephFS CSI driver broke mid-run on 2026-10-10
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - gp-engine.usd.edu
+      containers:
+        - name: compute
+          image: zeamoxwang/flow_matching@sha256:641b50a68367997b27435125300f0934992c29564962f148b6e12f870a0c53c8  # :latest amd64 2025-11-11
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RUN_ID
+              value: zimo-dm-equiv-cifar10-1
+            - name: OLD_COMMIT
+              value: 67ead936da2bc92fb39d15922e6aa6c27d2b153b
+            - name: HF_HOME
+              value: /nvme/hf
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              nvidia-smi
+              RUN=/pv/distance-marching-runs/$RUN_ID
+              OUT=/nvme/out
+              mkdir -p "$RUN" "$OUT" /nvme/old
+              cp -r /pv/distance-marching /nvme/new
+              NEW_COMMIT=$(git -C /nvme/new rev-parse HEAD)
+              git -C /nvme/new archive "$OLD_COMMIT" | tar -x -C /nvme/old
+              echo "OLD $OLD_COMMIT NEW $NEW_COMMIT" | tee "$RUN/commits.txt"
+              pip install --no-cache-dir -r /nvme/new/cifar10/requirements.txt 2>&1 | tail -2
+              python3 -c "import torch; print(torch.__version__)" | tee "$RUN/versions.txt"
+              mkdir -p /nvme/data && cp /pv/flow_matching/data/cifar-10-python.tar.gz /nvme/data/
+              COMMON="--data_path /nvme/data --batch_size 128 --num_workers 8 --seed 0"
+              OLD_MODEL="--use_ema --separate_t --max_period 1000000 --unified_scale 120.0 --edm_schedule --nfe 250 --dm_criteria fixed_steps"
+
+              echo "=== 1. sampling"
+              for m in st gd; do
+                if [ $m = st ]; then STEP=0.031; else STEP=0.46; fi
+                for r in old_a old_b; do
+                  (cd /nvme/old/cifar10 && python3 sample.py $COMMON $OLD_MODEL --dm_method $m --dm_step_size $STEP \
+                    --compute_fid --fid_samples 128 --save_fid_samples --test_run --output_dir $OUT/sample_${m}_$r) > $RUN/sample_${m}_$r.log 2>&1
+                done
+                (cd /nvme/new/cifar10 && python3 sample.py $COMMON --dm_method $m \
+                  --compute_fid --fid_samples 128 --save_fid_samples --test_run --output_dir $OUT/sample_${m}_new) > $RUN/sample_${m}_new.log 2>&1
+                grep -h "Result" $RUN/sample_${m}_*.log
+              done
+
+              echo "=== 2. training (3 epochs, torchrun 1 process)"
+              OLD_TRAIN="--use_ema --ema_decay 0.999 --separate_t --max_period 1000000 --unified_scale 120.0 \
+                --c 4.0 --w_os 0.1 --w_de 1.0 --skewed_timesteps --class_drop_prob 1.0 --cfg_scale 0.0 \
+                --lr 1e-4 --optimizer_betas 0.9 0.95 --edm_schedule --nfe 250 --dm_method st --dm_step_size 0.03 --dm_criteria fixed_steps"
+              TRAIN_RUN="--epochs 3 --eval_frequency 3 --fid_samples 128"
+              for r in old_a old_b; do
+                (cd /nvme/old/cifar10 && torchrun --nproc_per_node=1 train.py $COMMON $OLD_TRAIN $TRAIN_RUN \
+                  --output_dir $OUT/train_$r) > $RUN/train_$r.log 2>&1
+              done
+              (cd /nvme/new/cifar10 && torchrun --nproc_per_node=1 train.py $COMMON --dm_step_size 0.03 $TRAIN_RUN \
+                --output_dir $OUT/train_new) > $RUN/train_new.log 2>&1
+              grep -h "Training time" $RUN/train_*.log
+
+              echo "=== 3. compare"
+              C="python3 /nvme/new/execute/equivalence/compare.py"
+              {
+                for m in st gd; do
+                  echo "--- sampling $m"
+                  $C images $OUT/sample_${m}_old_a/fid_samples.npy $OUT/sample_${m}_old_b/fid_samples.npy $OUT/sample_${m}_new/fid_samples.npy
+                done
+                echo "--- training losses"
+                $C cifarlog $OUT/train_old_a/log.txt $OUT/train_old_b/log.txt $OUT/train_new/log.txt
+                echo "--- training weights (checkpoint-2)"
+                $C ckpt $OUT/train_old_a/checkpoint-2.pth $OUT/train_old_b/checkpoint-2.pth $OUT/train_new/checkpoint-2.pth
+                echo "--- samples generated at the end of training"
+                python3 - <<'EOF'
+              import glob, numpy as np
+              from PIL import Image
+              out = "/nvme/out"
+              ims = {r: np.asarray(Image.open(glob.glob(f"{out}/train_{r}/snapshots/2_0.png")[0])).astype(np.int64) for r in ["old_a", "old_b", "new"]}
+              for r in ["old_b", "new"]:
+                  d = np.abs(ims[r] - ims["old_a"])
+                  print(f"  snapshot {r} vs old_a: identical={bool((d == 0).all())} n_diff={int((d != 0).sum())} max_abs={int(d.max())}")
+              EOF
+              } 2>&1 | tee $RUN/compare.txt
+              for r in old_a old_b new; do mkdir -p $RUN/train_$r && cp $OUT/train_$r/log.txt $RUN/train_$r/; done
+              echo "EQUIV DONE"
+          resources:
+            requests:
+              cpu: "8"
+              memory: 32Gi
+              ephemeral-storage: 60Gi
+              nvidia.com/a100: 1
+            limits:
+              cpu: "8"
+              memory: 32Gi
+              ephemeral-storage: 60Gi
+              nvidia.com/a100: 1
+          volumeMounts:
+            - name: pv
+              mountPath: /pv
+            - name: nvme
+              mountPath: /nvme
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: pv
+          persistentVolumeClaim:
+            claimName: zmw-vol-haosu
+        - name: nvme
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi

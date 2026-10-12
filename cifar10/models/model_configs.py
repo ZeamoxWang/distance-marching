@@ -36,8 +36,7 @@ MODEL_CONFIGS = {
 def instantiate_model(
     architechture: str = "cifar10",
     use_ema: bool = True,
-    separate_t: bool = True,
-    max_period: float = 10000,
+    max_period: float = 1000000.0,
     unified_scale: float = 1.0,
     ema_decay: float = 0.999,
 ):
@@ -46,7 +45,6 @@ def instantiate_model(
     ), f"Model architecture {architechture} is missing its config."
 
     config = MODEL_CONFIGS[architechture].copy()
-    config["separate_t"] = separate_t
     config["max_period"] = max_period
     config["unified_scale"] = unified_scale
     model = DistanceMarching(**config)

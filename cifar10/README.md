@@ -39,13 +39,13 @@ torchrun --nproc_per_node=4 train.py \
     --data_path ./data \
     --batch_size 128 --accum_iter 1 --epochs 3000 \
     --lr 1e-4 --optimizer_betas 0.9 0.95 \
-    --class_drop_prob 1.0 --cfg_scale 0.0 \
+    --class_drop_prob 1.0 \
     --use_ema --ema_decay 0.999 \
     --skewed_timesteps \
-    --separate_t --max_period 1000000 --unified_scale 120.0 \
+    --max_period 1000000 --unified_scale 120.0 \
     --c 4.0 --w_os 0.1 --w_de 1.0 \
-    --edm_schedule --nfe 250 \
-    --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+    --nfe 250 \
+    --dm_method st --dm_step_size 0.031 \
     --compute_fid --fid_samples 1024 --eval_frequency 10 \
     --timestamp --output_dir ./output_dir
 ```
@@ -58,8 +58,8 @@ Checkpoints are written to `<output_dir>/<timestamp>/checkpoint-<epoch>.pth`
 Smoke test (one training batch + one evaluation batch on a single GPU):
 
 ```bash
-python train.py --test_run --use_ema --separate_t --max_period 1000000 \
-    --unified_scale 120.0 --c 4.0 --skewed_timesteps --edm_schedule --nfe 250 \
+python train.py --test_run --use_ema --max_period 1000000 \
+    --unified_scale 120.0 --c 4.0 --skewed_timesteps --nfe 250 \
     --dm_method st --dm_step_size 0.031 --compute_fid --fid_samples 128 \
     --batch_size 128 --output_dir ./output_smoke
 ```
@@ -76,9 +76,9 @@ Sphere tracing (paper: FID 2.23 with 50k samples, 250 steps, seed 0):
 ```bash
 cd cifar10
 python sample.py \
-    --use_ema --separate_t --max_period 1000000 --unified_scale 120.0 \
-    --edm_schedule --nfe 250 \
-    --dm_method st --dm_step_size 0.031 --dm_criteria fixed_steps \
+    --use_ema --max_period 1000000 --unified_scale 120.0 \
+    --nfe 250 \
+    --dm_method st --dm_step_size 0.031 \
     --compute_fid --fid_samples 50000 --save_fid_samples \
     --batch_size 128 --seed 0 \
     --timestamp --output_dir ./samples_st
@@ -88,9 +88,9 @@ Gradient descent (paper: FID 2.54):
 
 ```bash
 python sample.py \
-    --use_ema --separate_t --max_period 1000000 --unified_scale 120.0 \
-    --edm_schedule --nfe 250 \
-    --dm_method gd --dm_step_size 0.46 --dm_criteria fixed_steps \
+    --use_ema --max_period 1000000 --unified_scale 120.0 \
+    --nfe 250 \
+    --dm_method gd --dm_step_size 0.46 \
     --compute_fid --fid_samples 50000 --save_fid_samples \
     --batch_size 128 --seed 0 \
     --timestamp --output_dir ./samples_gd
@@ -124,8 +124,8 @@ FID is computed with `torchmetrics.image.fid.FrechetInceptionDistance(normalize=
 
 - `--init_sigma s` / `--init_uniform r`: start sampling from `N(0, s^2 I)` or
   `Uniform(-r, r)` instead of `N(0, I)` (train/test mismatch study).
-- `--dm_criteria dist_value --dm_threshold t`: adaptive early stopping on the
-  predicted distance. The per-sample effective steps and final distances are
-  written to `<output_dir>/distance_marching_stats.txt`.
-- `--dm_method st_ula --dm_ula_schedule '{"0.0": 1.0, "0.9": 0.01, "1.0": 0.0}'`:
-  sphere tracing with annealed Langevin noise.
+- `--OS_loss_ablation` (training): one-step loss without the
+  inverse-squared-distance weight, the ablation in the paper.
+- The defaults of `train.py` / `sample.py` are the paper settings, so the
+  model flags above can be omitted; `--dm_step_size` defaults to 0.031 for `st`
+  and 0.46 for `gd`.
