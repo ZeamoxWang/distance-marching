@@ -2,7 +2,7 @@
 
 <sub>Official PyTorch implementation</sub>
 
-### Paper (coming soon) | [Pretrained checkpoints](https://huggingface.co/zimowang/Distance-Marching)
+### [Paper](https://arxiv.org/abs/2602.02928) | [Project page](https://zeamoxwang.github.io/distance-marching-website/) | [Pretrained checkpoints](https://huggingface.co/zimowang/Distance-Marching)
 
 Zimo Wang, Ishit Mehta, Haolin Lu, Xunpeng Huang, Chung-En Sun, Ge Yan, Tsui-Wei Weng, Tzu-Mao Li
 <br>UC San Diego
@@ -15,10 +15,11 @@ Diffusion and flow-matching models transport noise toward the data manifold
 without representing the manifold itself. **Distance Marching** explores the
 alternative: it explicitly learns a *distance field* of the data manifold, so
 that generation becomes a descent process that only needs the current position.
-The negative gradient of the field gives the denoising direction, the distance
-value gives the step size, and no time input is needed at all. As shown above,
-emphasizing closer targets during training keeps the trajectories from wandering
-toward the data mean early in sampling, which is what the flow-matching loss does.
+The negative gradient of the field gives the direction, the distance value can
+optionally determine the step size, and no time input is needed. As shown above,
+our losses emphasize closer targets, whereas the flow-matching loss favors a
+direction biased toward the data mean in the early stages of generation; after
+20% of the sampling steps our trajectories wander less.
 
 This repository contains:
 
@@ -43,8 +44,9 @@ and the backbone (the original U-Net or SiT) receives this prediction through
 the slot that normally takes the time embedding and outputs the denoising
 direction `v_theta(x)`.
 
-Training pairs `(x, s)` are linear interpolations between Gaussian noise and a
-data sample `s`, without any re-matching. Two losses are used:
+For each training pair `(x, s)`, `x` is the standard linear interpolation between
+Gaussian noise and a data sample `s`, drawn without reassignment. Two losses are
+used:
 
 * **One-Step Loss** `w * || x - u_theta(x) v_theta(x) - s ||^2` with the
   weight `w = 1 / (||x - s||^2 + eps)`, which emphasizes closer targets and
@@ -58,21 +60,21 @@ pure Gaussian noise and run a fixed number of steps with step size `eta`:
 | Sampler | Update | Step size (paper) |
 | --- | --- | --- |
 | Sphere tracing (`st`) | `x <- x - eta * u_theta(x) * v_theta(x)` | 0.031 (CIFAR-10), 0.022 (ImageNet) |
-| Gradient descent (`gd`) | `x <- x - eta * v_theta(x)` | 0.46 (CIFAR-10), 0.64 (ImageNet) |
+| Gradient descent (`gd`) | `x <- x - eta * v_theta(x)` | 0.46 (CIFAR-10), 0.64 (ImageNet B/2) |
 
 <p align="center">
   <img src="assets/two_moons.png" width="820">
 </p>
 
-*Left:* on two moons the learned field `u_theta` (level sets, arrows show
-`-grad u_theta`) is a distance-like function to the data (orange). *Right:* sphere
-tracing moves samples from the initial noise (black) through intermediate
-states (yellow) onto the data support (blue).
+*Left:* target two moons (orange) and the learned distance-like scalar field
+`u_theta` with `-grad u_theta`. *Right:* our samples: initial (black),
+intermediate (yellow) and final (blue).
 
 ## Samples
 
-ImageNet 256x256, class-conditional, DM-XL/2 with CFG 4.0. Top: sphere tracing;
-bottom: gradient descent from the same initial noise.
+Curated ImageNet 256x256 samples from our XL/2 model with CFG scale 4.0. Top:
+250-step sphere tracing with step size 0.015; bottom: 250-step gradient descent
+with step size 0.5.
 
 <p align="center">
   <img src="assets/imagenet_sphere_tracing.jpg" width="100%">
@@ -197,19 +199,21 @@ python evaluator.py VIRTUAL_imagenet256_labeled.npz samples_st/<run>/samples.npz
   <img src="assets/distance_vs_steps.png" width="560">
 </p>
 
-Because the model predicts the distance to the manifold at every step, the
-prediction itself tells when sampling has converged: `u_theta` settles at
-`sqrt(c_0)`, its value on the data, well before the 250 steps are used up
-(ImageNet, 64 initial noise vectors shown above). This allows early stopping,
-and out-of-distribution inputs show up as large predicted distances.
+The model predicts the distance to the manifold at every step; on ImageNet,
+`u_theta` settles near `sqrt(c_0)` before the 250 steps are used up. The paper
+uses this prediction for adaptive stopping (gradient descent stops once
+`u_theta` has increased for 10 consecutive steps, which reduces the average
+number of steps by 29.7% on ImageNet) and for out-of-distribution detection.
 
 ## Citation
 
 ```bibtex
-@article{wang2026distancemarching,
-  title   = {Distance Marching for Generative Modeling},
-  author  = {Wang, Zimo and Mehta, Ishit and Lu, Haolin and Huang, Xunpeng and Sun, Chung-En and Yan, Ge and Weng, Tsui-Wei and Li, Tzu-Mao},
-  year    = {2026}
+@inproceedings{wang2026distancemarching,
+  title     = {Distance Marching for Generative Modeling},
+  author    = {Wang, Zimo and Mehta, Ishit and Lu, Haolin and Huang, Xunpeng and
+               Sun, Chung-En and Yan, Ge and Weng, Tsui-Wei and Li, Tzu-Mao},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2026}
 }
 ```
 

@@ -71,7 +71,7 @@ sampler and computes FID against the CIFAR-10 training set. Without `--ckpt`
 the checkpoint is downloaded from Hugging Face
 (`zimowang/Distance-Marching`, file `cifar10-checkpoint-1809.pth`).
 
-Sphere tracing (paper: FID 2.23 with 50k samples, 250 steps, seed 0):
+Sphere tracing (paper: FID 2.23 with 50k samples, 250 steps):
 
 ```bash
 cd cifar10
