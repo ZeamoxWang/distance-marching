@@ -193,18 +193,6 @@ cd imagenet
 python evaluator.py VIRTUAL_imagenet256_labeled.npz samples_st/<run>/samples.npz
 ```
 
-## Distance prediction
-
-<p align="center">
-  <img src="assets/distance_vs_steps.png" width="560">
-</p>
-
-The model predicts the distance to the manifold at every step; on ImageNet,
-`u_theta` settles near `sqrt(c_0)` before the 250 steps are used up. The paper
-uses this prediction for adaptive stopping (gradient descent stops once
-`u_theta` has increased for 10 consecutive steps, which reduces the average
-number of steps by 29.7% on ImageNet) and for out-of-distribution detection.
-
 ## Citation
 
 ```bibtex
