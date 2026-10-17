@@ -12,18 +12,17 @@ Zimo Wang, Ishit Mehta, Haolin Lu, Xunpeng Huang, Chung-En Sun, Ge Yan, Tsui-Wei
 </p>
 
 Diffusion and flow-matching models transport noise toward the data manifold
-without representing the manifold itself. **Distance Marching** explores the
-alternative: it explicitly learns a *distance field* of the data manifold, so
-that generation becomes a descent process that only needs the current position.
-The negative gradient of the field gives the direction, the distance value can
-optionally determine the step size, and no time input is needed. As shown above,
-our losses emphasize closer targets, whereas the flow-matching loss favors a
-direction biased toward the data mean in the early stages of generation; after
-20% of the sampling steps our trajectories wander less.
+without representing the manifold itself. **Distance Marching** learns a
+*distance field* of the data manifold instead. Generation then descends this
+field and only needs the current position. The negative gradient of the field
+gives the direction, the distance value can set the step size, and the model
+needs no time input. In the figure above, the flow-matching loss pulls early
+samples toward the data mean, while our losses emphasize closer targets. After
+20% of the sampling steps, our trajectories wander less.
 
 This repository contains:
 
-* Two self-contained codebases: [`cifar10/`](cifar10/) (pixel space, UNet) and
+* Two self-contained codebases: [`cifar10/`](cifar10/) (pixel space, U-Net) and
   [`imagenet/`](imagenet/) (latent space of SD-VAE, SiT backbone), each with
   training, sampling and FID evaluation.
 * Pretrained checkpoints for CIFAR-10 and ImageNet 256x256 (SiT-B/2) on
@@ -39,14 +38,13 @@ This repository contains:
 </p>
 
 The network takes only the (noisy) image `x` and an optional class label `y`. A
-light 2-layer CNN head predicts the distance `u_theta(x)` to the data manifold,
-and the backbone (the original U-Net or SiT) receives this prediction through
-the slot that normally takes the time embedding and outputs the denoising
-direction `v_theta(x)`.
+light two-layer CNN head predicts the distance `u_theta(x)` to the data manifold.
+The backbone (the original U-Net or SiT) takes this prediction in place of the
+time embedding and outputs the denoising direction `v_theta(x)`.
 
 For each training pair `(x, s)`, `x` is the standard linear interpolation between
-Gaussian noise and a data sample `s`, drawn without reassignment. Two losses are
-used:
+Gaussian noise and a data sample `s`, drawn without reassignment. We train with two
+losses:
 
 * **One-Step Loss** `w * || x - u_theta(x) v_theta(x) - s ||^2` with the
   weight `w = 1 / (||x - s||^2 + eps)`, which emphasizes closer targets and
@@ -73,7 +71,7 @@ intermediate (yellow) and final (blue).
 ## Samples
 
 Curated ImageNet 256x256 samples from our XL/2 model with CFG scale 4.0. Top:
-250-step sphere tracing with step size 0.015; bottom: 250-step gradient descent
+250-step sphere tracing with step size 0.015. Bottom: 250-step gradient descent
 with step size 0.5.
 
 <p align="center">
@@ -90,7 +88,7 @@ CIFAR-10, unconditional (no class and no time input), uncurated:
 ## Setup
 
 Each folder has its own `requirements.txt` (PyTorch 2.x, torchvision,
-torchmetrics for CIFAR-10 FID; diffusers, timm and TensorFlow for the ImageNet
+torchmetrics for CIFAR-10 FID, plus diffusers, timm and TensorFlow for the ImageNet
 VAE and the ADM evaluator):
 
 ```bash
@@ -113,8 +111,8 @@ when `--ckpt` is not given.
 
 | Checkpoint | Dataset | Backbone | Sampler | Steps | FID-50k |
 | --- | --- | --- | --- | ---: | ---: |
-| `cifar10-checkpoint-1809.pth` | CIFAR-10 32x32 | UNet | `st`, step 0.031 | 250 | 2.23 |
-| `cifar10-checkpoint-1809.pth` | CIFAR-10 32x32 | UNet | `gd`, step 0.46 | 250 | 2.54 |
+| `cifar10-checkpoint-1809.pth` | CIFAR-10 32x32 | U-Net | `st`, step 0.031 | 250 | 2.23 |
+| `cifar10-checkpoint-1809.pth` | CIFAR-10 32x32 | U-Net | `gd`, step 0.46 | 250 | 2.54 |
 | `imagenet-b2-0400000-ema.pt` | ImageNet 256x256 | SiT-B/2, CFG 2.0 | `st`, step 0.022 | 250 | 6.59 |
 | `imagenet-b2-0400000-ema.pt` | ImageNet 256x256 | SiT-B/2, CFG 2.0 | `gd`, step 0.64 | 250 | 6.67 |
 
@@ -130,7 +128,7 @@ python sample.py --use_ema --max_period 1000000 --unified_scale 120.0 \
 ```
 
 ImageNet 256x256 (SiT-B/2): generate 50k images and pack them into an `.npz`
-(switch to `--sampler gd --stepsize 0.64` for gradient descent; use more
+(switch to `--sampler gd --stepsize 0.64` for gradient descent, and use more
 processes to split the samples over GPUs):
 
 ```bash
@@ -175,7 +173,7 @@ torchrun --nnodes=1 --nproc_per_node=4 train.py \
 ```
 
 Both scripts write checkpoints and a `log.txt` with the per-epoch (CIFAR-10) or
-per-100-step (ImageNet) losses; resume with `--resume` / `--ckpt`. The full set
+per-100-step (ImageNet) losses. Resume with `--resume` / `--ckpt`. The full set
 of hyperparameters is listed in [`cifar10/README.md`](cifar10/README.md#training)
 and [`imagenet/README.md`](imagenet/README.md#training).
 
@@ -208,11 +206,11 @@ python evaluator.py VIRTUAL_imagenet256_labeled.npz samples_st/<run>/samples.npz
 ## License
 
 The CIFAR-10 code is derived from the `flow_matching` library and keeps its
-CC-BY-NC license (see `LICENSE`); the UNet and the distributed/grad-scaler helpers
+CC-BY-NC license (see `LICENSE`). The U-Net and the distributed/grad-scaler helpers
 are MIT-licensed. The ImageNet code is derived from SiT and Equilibrium Matching and
 keeps their licenses. The pretrained VAE `stabilityai/sd-vae-ft-ema` keeps its
 upstream license.
 
 ## Acknowledgments
 
-We thank Yaron Lipman, Marton Havasi, Peter Holderrieth, Neta Shaul, Matt Le, Brian Karrer, Ricky T. Q. Chen, David Lopez-Paz, Heli Ben-Hamu and Itai Gat for the [Flow Matching Guide and Code](https://github.com/facebookresearch/flow_matching), Nanye Ma, Mark Goldstein, Michael S. Albergo, Nicholas M. Boffi, Eric Vanden-Eijnden and Saining Xie for [SiT](https://github.com/willisma/SiT), and Runqian Wang and Yilun Du for [Equilibrium Matching](https://github.com/raywang4/EqM); this codebase is built on their open-source implementations.
+This codebase builds on the open-source implementations of [Flow Matching Guide and Code](https://github.com/facebookresearch/flow_matching) by Yaron Lipman, Marton Havasi, Peter Holderrieth, Neta Shaul, Matt Le, Brian Karrer, Ricky T. Q. Chen, David Lopez-Paz, Heli Ben-Hamu and Itai Gat, [SiT](https://github.com/willisma/SiT) by Nanye Ma, Mark Goldstein, Michael S. Albergo, Nicholas M. Boffi, Eric Vanden-Eijnden and Saining Xie, and [Equilibrium Matching](https://github.com/raywang4/EqM) by Runqian Wang and Yilun Du. We thank the authors.
